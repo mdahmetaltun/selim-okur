@@ -33,7 +33,7 @@
 
             <div class="letter-picker">
                 <h2 class="section-title">Bildiği Harfler</h2>
-                <p class="hint-text">Selim'in öğrendiği harflere tıkla ve seç:</p>
+                <p class="hint-text">Ders kitabında öğrendiği <strong>son harfe</strong> dokun. Ondan önceki harfler otomatik seçilir:</p>
 
                 <div class="letter-case-bar">
                     <span class="case-label">Harf Tipi:</span>
@@ -113,7 +113,7 @@
                 </button>
             </div>
 
-            <p class="footer-note">💡 En az 1 sesli ve 1 sessiz harf seçmelisin.</p>
+            <p class="footer-note">💡 Harfler Selim'in ders kitabındaki sırayla dizili.</p>
         </div>
     </div>
 
@@ -408,6 +408,15 @@
                 </div>
             </div>
 
+            <div class="settings-group">
+                <h3 class="settings-group-title">Geliştirici</h3>
+                <div class="setting-item">
+                    <label>Ses tanıma günlüğü</label>
+                    <button type="button" id="btn-export-log" class="btn-outline">⬇ İndir</button>
+                    <p class="setting-desc">Mikrofonun ne duyduğunu kaydeder; tanımayı iyileştirmek için kullanılır.</p>
+                </div>
+            </div>
+
             <div class="settings-actions">
                 <button id="btn-settings-save" class="btn-primary">💾 Kaydet</button>
             </div>
@@ -418,7 +427,9 @@
     <audio id="audio-wrong"></audio>
     <audio id="audio-levelup"></audio>
 
-    <script src="app.js?v=8"></script>
+    <script src="js/curriculum.js"></script>
+    <script src="js/judge.js"></script>
+    <script src="app.js?v=9"></script>
     <script>
         // Unregister service worker during development so changes show immediately
         if ('serviceWorker' in navigator) {

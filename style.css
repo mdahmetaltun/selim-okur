@@ -389,3 +389,6 @@ body { display: flex; justify-content: center; align-items: center; padding: 16p
   .letter-grid { grid-template-columns: repeat(5, 1fr); }
   .syllable-display { font-size: 80px; }
 }
+
+/* Kitaptaki son bilinen harf vurgusu */
+.letter-btn.last-known { box-shadow: 0 0 0 4px #ffd93d, 0 6px 14px rgba(0,0,0,0.18); transform: scale(1.06); }

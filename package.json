@@ -1,0 +1,8 @@
+{
+  "name": "selim-okur",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js"
+  }
+}

@@ -3,107 +3,19 @@
  * Gerçek Web Speech API Ses Tanıma ve 1. Sınıf Küçük Harf Desteği
  */
 
-// Turkish alphabet (1. Sınıf uyumlu küçük harfler)
-const TURKISH_VOWELS = ['a', 'e', 'ı', 'i', 'o', 'ö', 'u', 'ü'];
-const TURKISH_CONSONANTS = ['b', 'c', 'ç', 'd', 'f', 'g', 'ğ', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'r', 's', 'ş', 't', 'v', 'y', 'z'];
-
-function isTurkishVowel(char) {
-    if (!char) return false;
-    return TURKISH_VOWELS.includes(char.toLocaleLowerCase('tr-TR'));
-}
-
-function isTurkishConsonant(char) {
-    if (!char) return false;
-    return TURKISH_CONSONANTS.includes(char.toLocaleLowerCase('tr-TR'));
-}
+// Müfredat (js/curriculum.js) ve hakem (js/judge.js) önceden yüklenir
+const TURKISH_VOWELS = Curriculum.VOWELS;
+const isTurkishVowel = (ch) => !!ch && Curriculum.isVowel(ch);
+const isTurkishConsonant = (ch) => !!ch && Curriculum.isConsonant(ch);
 
 function formatLetterCase(str) {
     if (!str) return '';
     return state.isLowerCase ? str.toLocaleLowerCase('tr-TR') : str.toLocaleUpperCase('tr-TR');
 }
 
-// Generate syllables from known letters
-function generateSyllablePool(knownLetters) {
-    if (!knownLetters || knownLetters.length === 0) return [];
-    const normalized = knownLetters.map(l => l.toLocaleLowerCase('tr-TR').trim()).filter(Boolean);
-    const vowels = normalized.filter(isTurkishVowel);
-    const consonants = normalized.filter(isTurkishConsonant);
-    const syllables = [];
-
-    // Simple: Consonant + Vowel (e.g. ma, le, ba)
-    consonants.forEach(c => {
-        vowels.forEach(v => {
-            const seq = (c + v).toLocaleLowerCase('tr-TR');
-            syllables.push({ id: `CV_${seq}`, sequence: seq, difficulty: 'Simple', isMastered: false, attemptCount: 0 });
-        });
-    });
-
-    // Simple: Vowel + Consonant (e.g. el, al, ak)
-    vowels.forEach(v => {
-        consonants.forEach(c => {
-            const seq = (v + c).toLocaleLowerCase('tr-TR');
-            syllables.push({ id: `VC_${seq}`, sequence: seq, difficulty: 'Simple', isMastered: false, attemptCount: 0 });
-        });
-    });
-
-    // Medium: CVC (e.g. kek, bal, tam)
-    consonants.forEach(c1 => {
-        vowels.forEach(v => {
-            consonants.forEach(c2 => {
-                const seq = (c1 + v + c2).toLocaleLowerCase('tr-TR');
-                syllables.push({ id: `CVC_${seq}`, sequence: seq, difficulty: 'Medium', isMastered: false, attemptCount: 0 });
-            });
-        });
-    });
-
-    // Medium: VCV (e.g. ala, ela)
-    vowels.forEach(v1 => {
-        consonants.forEach(c => {
-            vowels.forEach(v2 => {
-                const seq = (v1 + c + v2).toLocaleLowerCase('tr-TR');
-                syllables.push({ id: `VCV_${seq}`, sequence: seq, difficulty: 'Medium', isMastered: false, attemptCount: 0 });
-            });
-        });
-    });
-
-    return syllables;
-}
-
-function getNextChallenge(availableSyllables, options = {}) {
-    if (!availableSyllables || availableSyllables.length === 0) return null;
-    const { preferDifficulty } = options;
-    const unmastered = availableSyllables.filter(s => !s.isMastered);
-    let candidates = unmastered.length > 0 ? unmastered : availableSyllables;
-    if (preferDifficulty) {
-        const filtered = candidates.filter(s => s.difficulty === preferDifficulty);
-        if (filtered.length > 0) candidates = filtered;
-    }
-    return candidates[Math.floor(Math.random() * candidates.length)];
-}
-
-// Generate words from known syllables
-function generateWordsFromSyllables(syllables) {
-    const words = [];
-    const simple = syllables.filter(s => s.difficulty === 'Simple');
-    if (simple.length < 2) return words;
-    for (let i = 0; i < Math.min(8, simple.length); i++) {
-        for (let j = 0; j < Math.min(8, simple.length); j++) {
-            if (i !== j) {
-                const seq = (simple[i].sequence + simple[j].sequence).toLocaleLowerCase('tr-TR');
-                words.push({
-                    sequence: seq,
-                    parts: [simple[i], simple[j]],
-                    difficulty: 'Simple'
-                });
-            }
-        }
-    }
-    return words;
-}
-
 // Game state
 const state = {
-    knownLetters: ['a', 'e', 'l', 'm'], // 1. Sınıf başlangıç harfleri varsayılan seçili
+    knownLetters: Curriculum.lettersThrough('t'), // ders kitabı sırası: a n e t ...
     isLowerCase: true, // 1. sınıf için varsayılan küçük harf
     syllables: [],
     currentSyllable: null,
@@ -167,7 +79,7 @@ function loadState() {
         if (saved) {
             const parsed = JSON.parse(saved);
             if (Array.isArray(parsed.knownLetters) && parsed.knownLetters.length > 0) {
-                state.knownLetters = parsed.knownLetters.map(l => l.toLocaleLowerCase('tr-TR'));
+                state.knownLetters = Curriculum.normalizeKnown(parsed.knownLetters);
             }
             state.level = parsed.level || 1;
             state.score = parsed.score || 0;
@@ -228,40 +140,24 @@ function showScreen(name) {
     }
 }
 
-// Letter picker
+// Letter picker: kitaptaki sırayla dizilir; bir harfe dokunmak "buraya kadar öğrendi" demektir
 function renderLetterGrid() {
-    const allLetters = [...TURKISH_VOWELS, ...TURKISH_CONSONANTS];
     const grid = elements['letter-grid'];
     if (!grid) return;
-
-    const existingBtns = grid.querySelectorAll('.letter-btn');
-    if (existingBtns.length === allLetters.length) {
-        existingBtns.forEach(btn => {
-            const letter = btn.dataset.letter.toLocaleLowerCase('tr-TR');
-            const mainSpan = btn.querySelector('.letter-main');
-            const subSpan = btn.querySelector('.letter-sub');
-            if (mainSpan) {
-                mainSpan.textContent = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
-            }
-            if (subSpan) {
-                subSpan.textContent = state.isLowerCase ? letter.toLocaleUpperCase('tr-TR') : letter;
-            }
-            btn.classList.toggle('selected', state.knownLetters.includes(letter));
-        });
-    } else {
-        grid.innerHTML = '';
-        allLetters.forEach(letter => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'letter-btn' + (isTurkishVowel(letter) ? ' vowel-btn' : ' consonant-btn');
-            btn.dataset.letter = letter;
-            const mainChar = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
-            const subChar = state.isLowerCase ? letter.toLocaleUpperCase('tr-TR') : letter;
-            btn.innerHTML = `<span class="letter-main">${mainChar}</span><span class="letter-sub">${subChar}</span>`;
-            if (state.knownLetters.includes(letter)) btn.classList.add('selected');
-            grid.appendChild(btn);
-        });
-    }
+    grid.innerHTML = '';
+    Curriculum.LETTER_ORDER.forEach((letter, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'letter-btn' + (isTurkishVowel(letter) ? ' vowel-btn' : ' consonant-btn');
+        btn.dataset.letter = letter;
+        const mainChar = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
+        const subChar = state.isLowerCase ? letter.toLocaleUpperCase('tr-TR') : letter;
+        btn.innerHTML = `<span class="letter-main">${mainChar}</span><span class="letter-sub">${subChar}</span>`;
+        btn.title = `${i + 1}. harf`;
+        if (state.knownLetters.includes(letter)) btn.classList.add('selected');
+        if (letter === state.knownLetters[state.knownLetters.length - 1]) btn.classList.add('last-known');
+        grid.appendChild(btn);
+    });
     renderSelectedTags();
 }
 
@@ -284,24 +180,14 @@ function renderSelectedTags() {
     state.knownLetters.forEach(letter => {
         const tag = document.createElement('div');
         tag.className = 'tag';
-        const displayLetter = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
-        tag.innerHTML = `${displayLetter} <span class="tag-remove" data-letter="${letter}">✕</span>`;
-        tag.querySelector('.tag-remove').addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleLetter(letter);
-        });
+        tag.textContent = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
         container.appendChild(tag);
     });
 }
 
-function toggleLetter(letter) {
-    const norm = letter.toLocaleLowerCase('tr-TR');
-    const idx = state.knownLetters.indexOf(norm);
-    if (idx >= 0) {
-        state.knownLetters.splice(idx, 1);
-    } else {
-        state.knownLetters.push(norm);
-    }
+// Bir harfe dokunmak, sıradaki o harfe kadar olan tüm harfleri bilinen yapar
+function setKnownThrough(letter) {
+    state.knownLetters = Curriculum.lettersThrough(letter);
     renderLetterGrid();
     updateStartButton();
     saveState();
@@ -319,9 +205,9 @@ function updateStartButton() {
 
 // Game Loop
 function startGame() {
-    state.syllables = generateSyllablePool(state.knownLetters);
+    state.syllables = Curriculum.generateSyllables(state.knownLetters);
     if (state.syllables.length === 0) {
-        showFeedback('Lütfen en az 1 sesli ve 1 sessiz harf seçin!', 'error');
+        showFeedback('Önce kitapta öğrenilen son harfe dokun (en az bir sesli ve bir sessiz harf).', 'error');
         return;
     }
     state.level = 1;
@@ -364,9 +250,8 @@ function nextSyllable() {
         completeGame();
         return;
     }
-    let target = getNextChallenge(state.syllables, { preferDifficulty: 'Simple' });
-    if (!target) target = getNextChallenge(state.syllables, { preferDifficulty: 'Medium' });
-    if (!target) target = getNextChallenge(state.syllables);
+    const focusLetter = state.knownLetters[state.knownLetters.length - 1];
+    const target = Curriculum.pickSyllable(state.syllables, { focusLetter, exclude: state.currentSyllable });
     state.currentSyllable = target;
     renderCurrentSyllable();
 }
@@ -534,67 +419,54 @@ function startListening() {
     }
 }
 
+// Tanıma günlüğü: gerçekte ne duyulduğunu saklar, hakemi Selim'in sesine göre ayarlamak için
+function logAttempt(target, heard, result) {
+    try {
+        const log = JSON.parse(localStorage.getItem('selim_okur_asr_log') || '[]');
+        log.push({ t: Date.now(), target, heard, verdict: result.verdict, cost: result.best });
+        localStorage.setItem('selim_okur_asr_log', JSON.stringify(log.slice(-500)));
+    } catch (e) { /* günlük zorunlu değil */ }
+}
+
+function exportAsrLog() {
+    const blob = new Blob([localStorage.getItem('selim_okur_asr_log') || '[]'], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'selim-okur-tanima-gunlugu.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
 function evaluateSpeechInput(spokenText, alternatives) {
     if (!state.currentSyllable) return;
-    const target = state.currentSyllable.sequence.trim().toLocaleLowerCase('tr-TR');
+    const target = state.currentSyllable.sequence;
     const listenResult = elements['listen-result'] || document.getElementById('listen-result');
+    const heard = (alternatives && alternatives.length > 0) ? alternatives : [spokenText];
+    const pool = state.syllables.map(s => s.sequence);
+    const result = Judge.judge(target, heard, pool);
+    logAttempt(target, heard, result);
 
-    const clean = (s) => (s || '').trim().toLocaleLowerCase('tr-TR').replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'0-9]/g, '');
-    const deDup = (s) => clean(s).replace(/(.)\1+/g, '$1');
+    const setResult = (text, cls) => {
+        if (!listenResult) return;
+        listenResult.textContent = text;
+        listenResult.className = 'listen-result ' + cls;
+        listenResult.classList.remove('hidden');
+    };
 
-    const candidateList = (alternatives && alternatives.length > 0) ? alternatives : [spokenText];
-    const cleanedCandidates = candidateList.map(clean).filter(Boolean);
-
-    let isMatch = false;
-    let matchedText = '';
-
-    for (const cand of cleanedCandidates) {
-        // Tam eşleşme
-        if (cand === target) {
-            isMatch = true;
-            matchedText = cand;
-            break;
-        }
-        // Kelime öbeği içinde geçiyorsa (örneğin "bu el" veya "el dedin")
-        const words = cand.split(/\s+/);
-        if (words.includes(target)) {
-            isMatch = true;
-            matchedText = target;
-            break;
-        }
-        // Harf uzatma toleransı ("eeel", "elll" -> "el")
-        if (deDup(cand) === deDup(target)) {
-            isMatch = true;
-            matchedText = target;
-            break;
-        }
-        // Başlangıç veya bitiş eşleşmesi
-        if (cand.startsWith(target) || cand.endsWith(target)) {
-            isMatch = true;
-            matchedText = target;
-            break;
-        }
-    }
-
-    const firstHeard = cleanedCandidates[0] || spokenText;
-
-    if (isMatch) {
-        if (listenResult) {
-            listenResult.textContent = `Duyulan: "${matchedText}" ✓ Aferin!`;
-            listenResult.className = 'listen-result feedback-success';
-            listenResult.classList.remove('hidden');
-        }
+    if (result.verdict === 'correct') {
+        setResult(`Duyulan: "${result.heard}" ✓ Aferin!`, 'feedback-success');
         showSpeechBubble(`Aferin ${state.childName}! Doğru okudun!`);
         handleResult(true);
+    } else if (result.verdict === 'uncertain') {
+        // Emin değiliz: çocuğu yanlış cezalandırma, veli karar versin
+        setResult(`Duyulan: "${result.heard}" — emin olamadım`, 'feedback-warning');
+        showSpeechBubble('Tam anlayamadım. Bir daha okur musun?');
+        showFeedback(`Duyulan: "${result.heard}". Doğru muydu? Veli onaylayabilir.`, 'warning');
+        elements['parent-check-group'].classList.remove('hidden');
     } else {
-        if (listenResult) {
-            listenResult.textContent = `Duyulan: "${firstHeard}" (Hedef: "${formatLetterCase(target)}")`;
-            listenResult.className = 'listen-result feedback-warning';
-            listenResult.classList.remove('hidden');
-        }
-        showSpeechBubble(`Ben "${firstHeard}" duydum. Tekrar deneyelim mi?`);
-        showFeedback(`Duyulan: "${firstHeard}" — Beklenen: "${formatLetterCase(target)}". Veli onayıyla da geçebilirsiniz.`, 'warning');
-        // Veli butonlarını görünür yap ki yapay zeka yanıldığında veli onaylayabilsin
+        setResult(`Duyulan: "${result.heard || '...'}" (Hedef: "${formatLetterCase(target)}")`, 'feedback-warning');
+        showSpeechBubble('Bir daha deneyelim mi?');
+        showFeedback(`Duyulan: "${result.heard || '...'}" — Beklenen: "${formatLetterCase(target)}". Veli onayıyla da geçebilirsiniz.`, 'warning');
         elements['parent-check-group'].classList.remove('hidden');
         handleResult(false);
     }
@@ -707,7 +579,7 @@ function completeGame() {
 
 // Word Game Mode
 function startWordGame() {
-    const words = generateWordsFromSyllables(state.syllables);
+    const words = Curriculum.wordsFor(state.knownLetters, { minSyllables: 2 });
     if (words.length === 0) {
         showFeedback('Yeterli hece yok! Önce harf seçip hece çalışın.', 'error');
         return;
@@ -716,6 +588,7 @@ function startWordGame() {
     state.currentWord = word;
     state.placedSyllables = [];
     elements['target-word-display'].textContent = formatLetterCase(word.sequence);
+    word.parts = word.syllables.map(sequence => ({ sequence }));
     elements['target-word-hint'].textContent = 'Heceleri doğru sıraya diz';
     elements['syllable-slots'].innerHTML = '';
     for (let i = 0; i < word.parts.length; i++) {
@@ -762,7 +635,6 @@ function checkWord() {
     const correct = state.placedSyllables.every((p, i) => p.sequence === state.currentWord.parts[i].sequence);
     const fb = elements['word-feedback'];
     if (correct) {
-        state.currentWord.isMastered = true;
         state.score += 20;
         state.masteredKelimeCount++;
         updateDisplays();
@@ -805,8 +677,7 @@ function renderDashboard() {
     const grid = elements['letter-progress-grid'];
     if (grid) {
         grid.innerHTML = '';
-        const allLetters = [...TURKISH_VOWELS, ...TURKISH_CONSONANTS];
-        allLetters.forEach(letter => {
+        Curriculum.LETTER_ORDER.forEach(letter => {
             const item = document.createElement('div');
             const isKnown = state.knownLetters.includes(letter);
             item.className = 'letter-progress-item' + (isKnown ? ' mastered' : '');
@@ -847,7 +718,7 @@ function saveSettings() {
 
 function resetProgress() {
     if (!confirm('Tüm ilerleme sıfırlanacak. Emin misiniz?')) return;
-    state.knownLetters = ['a', 'e', 'l', 'm'];
+    state.knownLetters = Curriculum.lettersThrough('t');
     state.level = 1;
     state.score = 0;
     state.streak = 0;
@@ -871,7 +742,7 @@ function setupEventListeners() {
 
     on('letter-grid', 'click', (e) => {
         const btn = e.target.closest('.letter-btn');
-        if (btn && btn.dataset.letter) toggleLetter(btn.dataset.letter);
+        if (btn && btn.dataset.letter) setKnownThrough(btn.dataset.letter);
     });
 
     on('btn-case-lower', 'click', () => {
@@ -914,6 +785,7 @@ function setupEventListeners() {
     on('btn-settings-back', 'click', () => showScreen('home'));
     on('btn-settings-save', 'click', saveSettings);
     on('btn-reset-progress', 'click', resetProgress);
+    on('btn-export-log', 'click', exportAsrLog);
 
     on('btn-repeat', 'click', () => {
         if (state.currentSyllable) speakSyllable(state.currentSyllable.sequence);
