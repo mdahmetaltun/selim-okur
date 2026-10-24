@@ -16,7 +16,8 @@ const C=require('{root}/js/curriculum.js');const k=new Set(['ui/aferin','ui/hari
 for(let n=2;n<={letters};n++){{C.buildLesson(C.LETTER_ORDER.slice(0,n),{{counts:{{hece:999,kelime:999,cumle:999}}}}).forEach(i=>k.add(i.key));}}
 C.LETTER_ORDER.slice(0,{letters}).forEach(l=>k.add('ses/'+l));
 C.wordsFor(C.LETTER_ORDER.slice(0,{letters})).forEach(w=>k.add('kelime/'+w.sequence));
-C.generateSyllables(C.LETTER_ORDER.slice(0,{letters})).filter(s=>s.difficulty==='Simple').forEach(s=>k.add('hece/'+s.sequence));
+C.generateSyllables(C.LETTER_ORDER.slice(0,{letters})).forEach(s=>k.add('hece/'+s.sequence));
+C.sentencesFor(C.LETTER_ORDER.slice(0,{letters})).forEach(s=>k.add('cumle/'+C.slug(s.text)));
 console.log(JSON.stringify([...k]));"""]))
 full = set(json.loads(rd('audio/manifest.json'))['keys'])
 keys = sorted(k for k in keys if k in full)

@@ -82,9 +82,13 @@
 
     /** Bilinen harflerden hece havuzu: V, CV, VC (kolay) ve CVC (orta). */
     function generateSyllables(knownLetters) {
-        const known = normalizeKnown(knownLetters);
-        const vowels = known.filter(isVowel);
-        const consonants = known.filter(isConsonant);
+        return syllablesFrom(normalizeKnown(knownLetters));
+    }
+
+    /** Verilen harf kümesinden (önek olmak zorunda değil) hece havuzu. */
+    function syllablesFrom(letters) {
+        const vowels = letters.filter(isVowel);
+        const consonants = letters.filter(isConsonant);
         const out = [];
         const add = (type, seq, difficulty) => out.push({
             id: `${type}_${seq}`, sequence: seq, type, difficulty, isMastered: false, attemptCount: 0
@@ -138,36 +142,117 @@
         return a;
     }
 
+    const item = (kind, text, units, chapter) => ({ kind, text, units, key: `${kind === 'cumle' ? 'cumle' : kind}/${kind === 'cumle' ? slug(text) : text}`, chapter });
+    const sylItem = (s, chapter) => item('hece', s.sequence, [s.sequence], chapter);
+    const wordItem = (w, chapter) => item('kelime', w.sequence, w.syllables, chapter);
+    const sentItem = (x, chapter) => item('cumle', x.text, x.words, chapter);
+    const KIND_ORDER = ['ses', 'hece', 'kelime', 'cumle'];
+    const KIND_CHAPTER = { ses: 'Ses', hece: 'Hece', kelime: 'Kelime', cumle: 'Cümle' };
+    const has = (text, letter) => fold(text).includes(letter);
+
     /**
-     * Ses temelli cümle yöntemi akışı: yeni harfin sesi -> hece -> kelime -> cümle.
-     * Her öğe: { kind, text, units, key } ; key ses dosyası/kayıt anahtarıdır.
+     * Bir "adım": prefix harfleriyle, odak harfi vurgulayan küçük ders.
+     * ses (odak) -> hece (çoğu odaklı, biraz tekrar) -> kelime -> cümle.
      */
+    function stepItems(prefix, focus, { rng = Math.random, counts = {}, used = new Set(), extraSes = [], chapter } = {}) {
+        const n = { hece: 6, kelime: 3, cumle: 1, ...counts };
+        const out = [];
+        const push = (it) => { if (!used.has(it.key)) { used.add(it.key); out.push(it); } };
+        [...extraSes, focus].forEach((l) => push(item('ses', l, [l], chapter)));
+
+        const pool = syllablesFrom(prefix).filter((x) => x.difficulty === 'Simple' && x.type !== 'V');
+        const withFocus = shuffle(pool.filter((x) => has(x.sequence, focus)), rng);
+        const review = shuffle(pool.filter((x) => !has(x.sequence, focus)), rng);
+        const nFocus = Math.min(withFocus.length, Math.ceil(n.hece * 0.7));
+        shuffle(withFocus.slice(0, nFocus).concat(review.slice(0, n.hece - nFocus)), rng).forEach((x) => push(sylItem(x, chapter)));
+
+        const words = wordsFor(prefix);
+        const wFocus = shuffle(words.filter((w) => has(w.sequence, focus)), rng);
+        const wRest = shuffle(words.filter((w) => !has(w.sequence, focus)), rng);
+        wFocus.concat(wRest).slice(0, n.kelime).forEach((w) => push(wordItem(w, chapter)));
+
+        const sFocus = shuffle(sentencesFor(prefix).filter((x) => has(x.text, focus)), rng);
+        sFocus.slice(0, n.cumle).forEach((x) => push(sentItem(x, chapter)));
+        return out;
+    }
+
+    /** Geriye dönük uyumluluk: son harfe odaklı tek adımlık ders. */
     function buildLesson(knownLetters, { rng = Math.random, counts = {} } = {}) {
         const known = normalizeKnown(knownLetters);
         if (known.length === 0) return [];
-        const n = { ses: 1, hece: 8, kelime: 6, cumle: 3, ...counts };
-        const focus = known[known.length - 1];
+        const n = { hece: 8, kelime: 6, cumle: 3, ...counts };
+        return stepItems(known, known[known.length - 1], { rng, counts: n });
+    }
+
+    /** "Baştan ilerle" yolundaki adım sayısı: ilk iki harften sonra her harf bir adım. */
+    const pathSteps = (knownLetters) => Math.max(0, normalizeKnown(knownLetters).length - 1);
+
+    /**
+     * Baştan ilerle: ilk adım ilk iki harfi birlikte (örn. a + n) öğretir, sonraki her adım
+     * bilinen sıradaki bir sonraki harfi ekler. Her adımda önceki harfler tekrar edilir.
+     * @param {number} from  kaçıncı adımdan başlanacağı (0'dan)
+     * @param {number} steps bu oturumda kaç adım
+     * @returns {{items, from, to, total, letters}} to: oturumdan sonraki adım numarası
+     */
+    function buildPath(knownLetters, { from = 0, steps = 2, rng = Math.random, counts } = {}) {
+        const known = normalizeKnown(knownLetters);
+        const total = pathSteps(known);
+        if (total === 0) return { items: [], from: 0, to: 0, total: 0, letters: [] };
+        const start = from >= total ? 0 : Math.max(0, from);
+        const end = Math.min(total, start + steps);
+        const used = new Set();
         const items = [];
+        const letters = [];
+        for (let st = start; st < end; st++) {
+            const focus = known[st + 1];
+            const label = st === 0 ? `${known[0]} ${known[1]}` : `+${focus}`;
+            letters.push(focus);
+            items.push(...stepItems(known.slice(0, st + 2), focus, { rng, counts, used, extraSes: st === 0 ? [known[0]] : [], chapter: label }));
+        }
+        return { items, from: start, to: end, total, letters };
+    }
 
-        items.push({ kind: 'ses', text: focus, units: [focus], key: `ses/${focus}` });
+    /** Karışık tekrar: tüm bilinen harflerden, harf odağı olmadan rastgele. */
+    function buildMixed(knownLetters, { rng = Math.random, counts = {} } = {}) {
+        const known = normalizeKnown(knownLetters);
+        if (known.length === 0) return [];
+        const n = { ses: 2, hece: 10, kelime: 8, cumle: 3, ...counts };
+        const items = [];
+        shuffle(known, rng).slice(0, n.ses).forEach((l) => items.push(item('ses', l, [l], KIND_CHAPTER.ses)));
+        const pool = syllablesFrom(known).filter((x) => x.type !== 'V');
+        const simple = shuffle(pool.filter((x) => x.difficulty === 'Simple'), rng);
+        const medium = shuffle(pool.filter((x) => x.difficulty === 'Medium'), rng);
+        const nMed = Math.min(medium.length, Math.floor(n.hece * 0.2));
+        shuffle(simple.slice(0, n.hece - nMed).concat(medium.slice(0, nMed)), rng).forEach((x) => items.push(sylItem(x, KIND_CHAPTER.hece)));
+        shuffle(wordsFor(known), rng).slice(0, n.kelime).forEach((w) => items.push(wordItem(w, KIND_CHAPTER.kelime)));
+        shuffle(sentencesFor(known), rng).slice(0, n.cumle).forEach((x) => items.push(sentItem(x, KIND_CHAPTER.cumle)));
+        return items;
+    }
 
-        const pool = generateSyllables(known).filter((s) => s.difficulty === 'Simple' && s.type !== 'V');
-        const withFocus = shuffle(pool.filter((s) => s.sequence.includes(focus)), rng);
-        const review = shuffle(pool.filter((s) => !s.sequence.includes(focus)), rng);
-        const syl = withFocus.slice(0, Math.ceil(n.hece * 0.65)).concat(review).slice(0, n.hece);
-        shuffle(syl, rng).forEach((s) => items.push({ kind: 'hece', text: s.sequence, units: [s.sequence], key: `hece/${s.sequence}` }));
-
-        const words = wordsFor(known);
-        const wFocus = shuffle(words.filter((w) => w.sequence.includes(focus)), rng);
-        const wRest = shuffle(words.filter((w) => !w.sequence.includes(focus)), rng);
-        wFocus.concat(wRest).slice(0, n.kelime).forEach((w) =>
-            items.push({ kind: 'kelime', text: w.sequence, units: w.syllables, key: `kelime/${w.sequence}` }));
-
-        const sents = sentencesFor(known);
-        const sFocus = shuffle(sents.filter((x) => x.text.toLocaleLowerCase(TR).includes(focus)), rng);
-        const sRest = shuffle(sents.filter((x) => !x.text.toLocaleLowerCase(TR).includes(focus)), rng);
-        sFocus.concat(sRest).slice(0, n.cumle).forEach((x) =>
-            items.push({ kind: 'cumle', text: x.text, units: x.words, key: `cumle/${slug(x.text)}` }));
+    /**
+     * Seçtiğim harfler: yalnızca seçilen harf ya da harf kombinasyonlarıyla çalış.
+     * - Hem sesli hem sessiz seçildiyse heceler yalnızca o harflerden kurulur (örn. k + a: ka, ak, kak).
+     * - Yalnızca sessiz seçildiyse bilinen tüm seslilerle, yalnızca sesli seçildiyse bilinen tüm sessizlerle birleşir.
+     * - Kelime ve cümleler, bilinen harflerle yazılmış ve seçilenlerden en az birini içerenlerdir (çok içeren önce).
+     */
+    function buildFocus(knownLetters, focusLetters, { rng = Math.random, counts = {} } = {}) {
+        const known = normalizeKnown(knownLetters);
+        const F = known.filter((l) => (focusLetters || []).map(fold).includes(l));
+        if (F.length === 0) return [];
+        const n = { ses: 4, hece: 12, cedit: 4, kelime: 8, cumle: 3, ...counts };
+        const fv = F.filter(isVowel), fc = F.filter(isConsonant);
+        const letters = fv.length && fc.length ? F : [...(fv.length ? fv : known.filter(isVowel)), ...(fc.length ? fc : known.filter(isConsonant))];
+        const items = [];
+        F.slice(0, n.ses).forEach((l) => items.push(item('ses', l, [l], KIND_CHAPTER.ses)));
+        const pool = syllablesFrom(letters).filter((x) => x.type !== 'V');
+        const simple = shuffle(pool.filter((x) => x.difficulty === 'Simple'), rng);
+        const medium = shuffle(pool.filter((x) => x.difficulty === 'Medium'), rng);
+        const nMed = Math.min(medium.length, n.cedit);
+        shuffle(simple.slice(0, n.hece - nMed).concat(medium.slice(0, nMed)), rng).forEach((x) => items.push(sylItem(x, KIND_CHAPTER.hece)));
+        const score = (text) => F.filter((l) => has(text, l)).length;
+        const byScore = (list, textOf) => shuffle(list.filter((x) => score(textOf(x)) > 0), rng).sort((a, b) => score(textOf(b)) - score(textOf(a)));
+        byScore(wordsFor(known), (w) => w.sequence).slice(0, n.kelime).forEach((w) => items.push(wordItem(w, KIND_CHAPTER.kelime)));
+        byScore(sentencesFor(known), (x) => x.text).slice(0, n.cumle).forEach((x) => items.push(sentItem(x, KIND_CHAPTER.cumle)));
         return items;
     }
 
@@ -175,5 +260,5 @@
         return fold(text).replace(/[.!?,]/g, '').trim().replace(/\s+/g, '_');
     }
 
-    return { LETTER_ORDER, VOWELS, LEXICON, SENTENCES, sentencesFor, buildLesson, slug, stageOf, fold, isVowel, isConsonant, lettersThrough, normalizeKnown, generateSyllables, pickSyllable, wordsFor };
+    return { LETTER_ORDER, VOWELS, LEXICON, SENTENCES, sentencesFor, buildLesson, buildPath, buildMixed, buildFocus, pathSteps, syllablesFrom, slug, stageOf, fold, isVowel, isConsonant, lettersThrough, normalizeKnown, generateSyllables, pickSyllable, wordsFor };
 });

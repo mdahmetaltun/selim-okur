@@ -54,7 +54,8 @@
 .rd-card.listening { border-color: #4dabf7; box-shadow: 0 0 0 8px rgba(77,171,247,.22), 0 12px 34px rgba(0,0,0,.08); }
 .rd-kind { font-family: var(--font-heading); font-size: clamp(16px, 2.2vw, 22px); font-weight: 700; color: #fff; background: var(--secondary); padding: 6px 18px; border-radius: 999px; }
 .rd-text { font-family: 'Andika', system-ui, sans-serif; font-weight: 700; color: #22223b; line-height: 1.05; letter-spacing: .02em; max-width: 100%; overflow-wrap: anywhere; }
-.rd-card[data-kind="ses"] .rd-text, .rd-card[data-kind="hece"] .rd-text { font-size: clamp(110px, min(24vw, 34vh), 300px); }
+.rd-card[data-kind="hece"] .rd-text { font-size: clamp(110px, min(24vw, 34vh), 300px); }
+.rd-card[data-kind="ses"] .rd-text { font-size: clamp(90px, min(20vw, 27vh), 250px); }
 .rd-card[data-kind="kelime"] .rd-text { font-size: clamp(64px, min(14vw, 22vh), 190px); }
 .rd-card[data-kind="cumle"] .rd-text { font-size: clamp(40px, min(7.5vw, 12vh), 100px); line-height: 1.3; letter-spacing: .01em; }
 .rd-text .syl { display: inline-block; }
@@ -62,7 +63,7 @@
 .rd-text .syl:nth-child(even) { color: #1864ab; }
 .rd-text .dot { color: #adb5bd; font-weight: 400; padding: 0 .04em; }
 .rd-text .word { display: inline-block; margin: 0 .22em; }
-.rd-text .pair { display: block; font-size: .32em; color: #adb5bd; font-weight: 400; margin-top: .1em; }
+.rd-text .pair { display: block; font-size: .28em; color: #adb5bd; font-weight: 400; margin-top: .1em; }
 .rd-hint { font-size: clamp(14px, 1.8vw, 18px); color: var(--text-light); font-weight: 600; min-height: 1.4em; }
 .rd-heard { font-size: clamp(14px, 1.8vw, 18px); font-weight: 700; color: #495057; min-height: 1.4em; }
 
@@ -130,3 +131,27 @@ button, input, select, textarea { font-family: inherit; }
 body { align-items: flex-start; }
 .screen { min-height: 0; }
 .screen.active { margin: auto; } /* sığıyorsa ortala, sığmıyorsa üstten başlayıp kaydır */
+
+/* ===== Ders türü seçimi ===== */
+.mode-picker { margin-top: 18px; padding: 14px; background: #f8f9fa; border-radius: 22px; }
+.mode-picker .section-title { font-size: 18px; margin-bottom: 8px; }
+.mode-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.mode-chip { border: 2px solid #dfe6e9; background: #fff; color: var(--text-dark); border-radius: 999px; padding: 10px 16px; font-family: var(--font-heading); font-weight: 700; font-size: 15px; cursor: pointer; transition: var(--transition); }
+.mode-chip:hover { border-color: var(--primary); }
+.mode-chip.active { background: var(--primary); border-color: var(--primary-dark); color: #fff; box-shadow: 0 6px 14px rgba(255,107,107,.3); }
+.mode-desc { margin: 10px 4px 0; text-align: center; font-size: 14px; color: var(--text-light); min-height: 2.6em; }
+.path-status { margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; font-weight: 700; font-size: 14px; color: var(--text-dark); }
+.path-status button { border: 2px solid #dfe6e9; background: #fff; border-radius: 12px; padding: 6px 12px; font-family: var(--font-heading); font-weight: 700; cursor: pointer; }
+.path-status button:hover { border-color: var(--primary); color: var(--primary); }
+.path-dots { display: flex; gap: 5px; align-items: center; }
+.path-dots i { width: 12px; height: 12px; border-radius: 50%; background: #dfe6e9; }
+.path-dots i.done { background: var(--success); }
+.path-dots i.next { background: #ffd43b; box-shadow: 0 0 0 3px rgba(255,212,59,.35); }
+/* Seçtiğim harfler modu: bilinen harfler seçilebilir, bilinmeyenler soluk */
+.letter-grid.focus-mode .letter-btn:not(.selected) { opacity: .35; }
+.letter-grid.focus-mode .letter-btn.selected { background: #fff; color: var(--text-dark); border-color: #adb5bd; box-shadow: none; }
+.letter-grid.focus-mode .letter-btn.selected .letter-sub { color: #adb5bd; }
+.letter-grid.focus-mode .letter-btn.focus-sel { background: #339af0; color: #fff; border-color: #1c7ed6; box-shadow: 0 0 0 4px rgba(51,154,240,.3); transform: scale(1.06); }
+.letter-grid.focus-mode .letter-btn.focus-sel .letter-sub { color: rgba(255,255,255,.85); }
+.letter-grid.focus-mode .letter-btn.last-known { transform: none; }
+.letter-grid.focus-mode .letter-btn.focus-sel.last-known { transform: scale(1.06); }

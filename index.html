@@ -34,7 +34,7 @@
 
             <div class="letter-picker">
                 <h2 class="section-title">Bildiği Harfler</h2>
-                <p class="hint-text">Ders kitabında öğrendiği <strong>son harfe</strong> dokun. Ondan önceki harfler otomatik seçilir:</p>
+                <p class="hint-text" id="letter-hint">Ders kitabında öğrendiği <strong>son harfe</strong> dokun. Ondan önceki harfler otomatik seçilir:</p>
 
                 <div class="letter-case-bar">
                     <span class="case-label">Harf Tipi:</span>
@@ -74,6 +74,16 @@
                     <button type="button" class="letter-btn consonant-btn" data-letter="z"><span class="letter-main">z</span><span class="letter-sub">Z</span></button>
                 </div>
 
+                <div class="mode-picker">
+                    <h3 class="section-title">Ne çalışalım?</h3>
+                    <div class="mode-chips" role="radiogroup" aria-label="Ders türü">
+                        <button type="button" class="mode-chip active" data-mode="path" role="radio">📚 Baştan ilerle</button>
+                        <button type="button" class="mode-chip" data-mode="mixed" role="radio">🔀 Karışık tekrar</button>
+                        <button type="button" class="mode-chip" data-mode="focus" role="radio">🎯 Seçtiğim harfler</button>
+                    </div>
+                    <p class="mode-desc" id="mode-desc"></p>
+                    <div class="path-status" id="path-status"></div>
+
                 <div class="selected-stats">
                     <div class="stat-item">
                         <span class="stat-number" id="selected-vowel-count">0</span>
@@ -89,6 +99,8 @@
                     <span class="selected-label">Seçili Harfler:</span>
                     <div class="selected-tags" id="selected-tags"></div>
                 </div>
+
+            </div>
             </div>
 
             <div class="mode-toggle premium-toggle">

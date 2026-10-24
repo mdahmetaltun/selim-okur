@@ -24,3 +24,14 @@ test('ders öğelerinin (ilk 12 harf) hepsinin sesi var', () => {
         lesson.forEach((i) => assert.ok(keys.has(i.key), `${n} harf: ${i.key} yok`));
     }
 });
+
+test('baştan ilerle, karışık ve seçtiğim harfler derslerinin hepsinin sesi var', () => {
+    for (let n = 2; n <= 12; n++) {
+        const known = C.LETTER_ORDER.slice(0, n);
+        const check = (items, label) => items.forEach((i) => assert.ok(keys.has(i.key), `${label} (${n} harf): ${i.key} yok`));
+        for (let from = 0; from < n - 1; from += 2) check(C.buildPath(known, { from, steps: 2 }).items, 'yol');
+        for (let r = 0; r < 20; r++) check(C.buildMixed(known), 'karışık');
+        known.forEach((l) => check(C.buildFocus(known, [l]), `odak ${l}`));
+        check(C.buildFocus(known, known.slice(0, 2)), 'odak 2 harf');
+    }
+});

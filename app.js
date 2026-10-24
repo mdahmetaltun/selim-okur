@@ -15,7 +15,6 @@ const KIND_HINT = {
     kelime: 'Hece hece oku, sonra birleştir',
     cumle: 'Kelimeleri sırayla oku'
 };
-const STEP_NAME = { ses: 'Ses', hece: 'Hece', kelime: 'Kelime', cumle: 'Cümle' };
 const POINTS = { ses: 5, hece: 10, kelime: 15, cumle: 25 };
 
 // ---------- Durum ----------
@@ -30,10 +29,13 @@ const state = {
     character: '🦁',
     sfxEnabled: true,
     engine: 'auto',
+    mode: 'path',          // path | mixed | focus
+    focusLetters: [],      // 'Seçtiğim harfler' modunda çalışılacak harfler
+    pathStep: 0,           // 'Baştan ilerle' yolunda tamamlanan adım sayısı
     stats: {},       // anahtar -> { ok, tries }
     activities: []
 };
-const PERSIST = ['knownLetters', 'isLowerCase', 'score', 'lessons', 'isParentMode', 'isAutoMode', 'childName', 'character', 'sfxEnabled', 'engine', 'stats', 'activities'];
+const PERSIST = ['knownLetters', 'isLowerCase', 'score', 'lessons', 'isParentMode', 'isAutoMode', 'childName', 'character', 'sfxEnabled', 'engine', 'mode', 'focusLetters', 'pathStep', 'stats', 'activities'];
 
 const $ = (id) => document.getElementById(id);
 const screens = {};
@@ -45,6 +47,7 @@ function init() {
     renderLetterGrid();
     updateCaseButtons();
     updateStartButton();
+    renderModePicker();
     renderDashboard();
     setupEventListeners();
     showScreen('home');
@@ -58,6 +61,9 @@ function loadState() {
             PERSIST.forEach((k) => { if (saved[k] !== undefined) state[k] = saved[k]; });
             state.knownLetters = Curriculum.normalizeKnown(state.knownLetters);
             if (state.knownLetters.length === 0) state.knownLetters = Curriculum.lettersThrough('t');
+            if (!['path', 'mixed', 'focus'].includes(state.mode)) state.mode = 'path';
+            state.focusLetters = (state.focusLetters || []).filter((l) => state.knownLetters.includes(l));
+            state.pathStep = Math.max(0, Number(state.pathStep) || 0);
         }
     } catch (e) { console.error('Load error:', e); }
     $('setting-child-name').value = state.childName;
@@ -100,6 +106,7 @@ function renderLetterGrid() {
     const grid = $('letter-grid');
     grid.innerHTML = '';
     const last = state.knownLetters[state.knownLetters.length - 1];
+    grid.classList.toggle('focus-mode', state.mode === 'focus');
     Curriculum.LETTER_ORDER.forEach((letter, i) => {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -111,6 +118,7 @@ function renderLetterGrid() {
         btn.title = `${i + 1}. harf`;
         if (state.knownLetters.includes(letter)) btn.classList.add('selected');
         if (letter === last) btn.classList.add('last-known');
+        if (state.mode === 'focus' && state.focusLetters.includes(letter)) btn.classList.add('focus-sel');
         grid.appendChild(btn);
     });
     renderSelectedTags();
@@ -131,9 +139,91 @@ function renderSelectedTags() {
 
 function setKnownThrough(letter) {
     state.knownLetters = Curriculum.lettersThrough(letter);
+    state.focusLetters = state.focusLetters.filter((l) => state.knownLetters.includes(l));
     renderLetterGrid();
     updateStartButton();
+    renderModePicker();
     saveState();
+}
+
+// ---------- Ders türü: baştan ilerle / karışık tekrar / seçtiğim harfler ----------
+const MODE_DESC = {
+    path: 'Baştan başlar: önce ilk iki harf, sonra her adımda bir harf eklenir. Önceki harfler de tekrar edilir.',
+    mixed: 'Bildiği tüm harflerden karışık hece, kelime ve cümleler. Harf sırası gözetilmez.',
+    focus: 'Yukarıdan bildiği harflerden çalışmak istediklerine dokun. Tek harf ya da birkaç harf seç (örn. k ve a).'
+};
+
+function setMode(mode) {
+    state.mode = mode;
+    renderLetterGrid();
+    updateStartButton();
+    renderModePicker();
+    saveState();
+}
+
+function toggleFocus(letter) {
+    if (!state.knownLetters.includes(letter)) {
+        renderModePicker(`${caseText(letter)} harfini henüz öğrenmedi. Önce "Bildiği Harfler" için o harfe kadar seç.`);
+        return;
+    }
+    const i = state.focusLetters.indexOf(letter);
+    if (i >= 0) state.focusLetters.splice(i, 1);
+    else state.focusLetters.push(letter);
+    state.focusLetters = Curriculum.LETTER_ORDER.filter((l) => state.focusLetters.includes(l));
+    renderLetterGrid();
+    updateStartButton();
+    renderModePicker();
+    saveState();
+}
+
+function renderModePicker(notice) {
+    document.querySelectorAll('.mode-chip').forEach((b) => {
+        const on = b.dataset.mode === state.mode;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    $('mode-desc').textContent = notice || MODE_DESC[state.mode];
+    $('letter-hint').innerHTML = state.mode === 'focus'
+        ? 'Çalışmak istediğin <strong>harflere</strong> dokun (soluk harfler henüz öğrenilmedi):'
+        : 'Ders kitabında öğrendiği <strong>son harfe</strong> dokun. Ondan önceki harfler otomatik seçilir:';
+    const box = $('path-status');
+    box.innerHTML = '';
+    if (state.mode === 'path') {
+        const total = Curriculum.pathSteps(state.knownLetters);
+        const done = Math.min(state.pathStep, total);
+        const known = Curriculum.normalizeKnown(state.knownLetters);
+        const dots = document.createElement('span');
+        dots.className = 'path-dots';
+        for (let i = 0; i < total; i++) {
+            const d = document.createElement('i');
+            d.className = i < done ? 'done' : i === done ? 'next' : '';
+            d.title = i === 0 ? `${known[0]} ${known[1]}` : `+${known[i + 1]}`;
+            dots.appendChild(d);
+        }
+        const label = document.createElement('span');
+        label.textContent = total === 0 ? 'Önce sesli ve sessiz birer harf seç.'
+            : done >= total ? 'Yol tamamlandı ✓ Baştan tekrar edilir.'
+                : `Sıradaki: ${done === 0 ? `${known[0]} ${known[1]}` : `+${known[done + 1]}`} (${done}/${total})`;
+        box.append(dots, label);
+        if (done > 0) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = 'Baştan başla';
+            b.onclick = () => { state.pathStep = 0; saveState(); renderModePicker(); };
+            box.appendChild(b);
+        }
+    } else if (state.mode === 'focus') {
+        const label = document.createElement('span');
+        label.textContent = state.focusLetters.length ? `Seçili: ${state.focusLetters.map(caseText).join(' + ')}` : 'Henüz harf seçmedin.';
+        box.appendChild(label);
+        if (state.focusLetters.length) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = 'Temizle';
+            b.onclick = () => { state.focusLetters = []; renderLetterGrid(); updateStartButton(); renderModePicker(); saveState(); };
+            box.appendChild(b);
+        }
+    }
 }
 
 function updateCaseButtons() {
@@ -142,39 +232,50 @@ function updateCaseButtons() {
 }
 
 function updateStartButton() {
-    const ok = state.knownLetters.some(isTurkishVowel) && state.knownLetters.some(isTurkishConsonant);
+    let ok = state.knownLetters.some(isTurkishVowel) && state.knownLetters.some(isTurkishConsonant);
+    if (state.mode === 'focus') ok = ok && state.focusLetters.length > 0;
     $('btn-start').disabled = !ok;
     $('btn-start').classList.toggle('disabled', !ok);
 }
 
 // ---------- Ders akışı ----------
-const lesson = { items: [], idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false };
+const lesson = { items: [], meta: { mode: 'path' }, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false };
+
+function buildSession() {
+    const known = state.knownLetters;
+    if (state.mode === 'focus') return { items: Curriculum.buildFocus(known, state.focusLetters), meta: { mode: 'focus' } };
+    if (state.mode === 'mixed') return { items: Curriculum.buildMixed(known), meta: { mode: 'mixed' } };
+    const p = Curriculum.buildPath(known, { from: state.pathStep, steps: 2 });
+    return { items: p.items, meta: { mode: 'path', from: p.from, to: p.to, total: p.total, letters: p.letters } };
+}
 
 function startLesson() {
     Voice.unlock();
-    const items = Curriculum.buildLesson(state.knownLetters);
-    if (items.length === 0) { alert('Önce kitapta öğrenilen son harfe dokun.'); return; }
-    Object.assign(lesson, { items, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false });
+    const { items, meta } = buildSession();
+    if (items.length === 0) { alert('Bu seçimle ders oluşturulamadı. Harf seçimini kontrol et.'); return; }
+    Object.assign(lesson, { items, meta, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false });
     $('rd-summary').classList.add('hidden');
     showScreen('game');
     $('character').textContent = state.character;
     renderSteps();
     showItem(0);
-    addActivity('start', `Ders başladı (${caseText(state.knownLetters[state.knownLetters.length - 1])} harfine kadar)`);
+    const what = meta.mode === 'path' ? `baştan ilerle, ${meta.letters.map(caseText).join(' ')}` : meta.mode === 'mixed' ? 'karışık tekrar' : `seçilen harfler: ${state.focusLetters.map(caseText).join(' ')}`;
+    addActivity('start', `Ders başladı (${what})`);
 }
 
 const currentItem = () => lesson.items[lesson.idx];
 const poolFor = (item) => lesson.items.filter((i) => i.kind === item.kind && i.key !== item.key);
 
+function chapters() { return [...new Set(lesson.items.map((i) => i.chapter))]; }
+
 function renderSteps() {
-    const kinds = [...new Set(lesson.items.map((i) => i.kind))];
     const ol = $('rd-steps');
     ol.innerHTML = '';
-    kinds.forEach((k) => {
+    chapters().forEach((c) => {
         const li = document.createElement('li');
         li.className = 'rd-step';
-        li.dataset.kind = k;
-        li.textContent = STEP_NAME[k];
+        li.dataset.chapter = c;
+        li.textContent = caseText(c);
         ol.appendChild(li);
     });
     updateSteps();
@@ -183,12 +284,12 @@ function renderSteps() {
 function updateSteps() {
     const cur = currentItem();
     document.querySelectorAll('.rd-step').forEach((li) => {
-        const k = li.dataset.kind;
-        const all = lesson.items.filter((i) => i.kind === k);
+        const c = li.dataset.chapter;
+        const all = lesson.items.filter((i) => i.chapter === c);
         const doneN = all.filter((i) => lesson.items.indexOf(i) < lesson.idx).length;
         li.style.setProperty('--p', (doneN / all.length).toFixed(2));
         li.classList.toggle('done', doneN === all.length);
-        li.classList.toggle('current', !!cur && cur.kind === k);
+        li.classList.toggle('current', !!cur && cur.chapter === c);
     });
 }
 
@@ -431,14 +532,26 @@ function nextItem(skipped) {
 function finishLesson() {
     lesson.done = true;
     state.lessons++;
+    const m = lesson.meta;
+    if (m.mode === 'path') state.pathStep = m.to; // bir sonraki oturum kaldığı yerden devam eder
     const total = lesson.items.length;
     const ratio = lesson.passed / total;
     const stars = ratio >= 0.9 ? 3 : ratio >= 0.6 ? 2 : 1;
     saveState();
+    renderModePicker();
     addActivity('lesson', `Ders bitti: ${lesson.passed}/${total} (${'⭐'.repeat(stars)})`);
     playSound('levelup');
-    const idx = Curriculum.LETTER_ORDER.indexOf(state.knownLetters[state.knownLetters.length - 1]);
-    const next = Curriculum.LETTER_ORDER[idx + 1];
+    const last = state.knownLetters[state.knownLetters.length - 1];
+    const next = Curriculum.LETTER_ORDER[Curriculum.LETTER_ORDER.indexOf(last) + 1];
+    const pathLeft = m.mode === 'path' && m.to < m.total;
+    const nextStepLetter = pathLeft ? Curriculum.normalizeKnown(state.knownLetters)[m.to + 1] : null;
+    const buttons = [];
+    if (pathLeft) buttons.push(`<button class="btn-primary" id="sum-continue">Devam: +${caseText(nextStepLetter)} ➔</button>`);
+    else buttons.push(`<button class="btn-primary" id="sum-continue">${m.mode === 'path' ? 'Baştan tekrar' : 'Yeni ders'} ➔</button>`);
+    if (next && !pathLeft) buttons.push(`<button class="btn-secondary" id="sum-next">Yeni harf: ${caseText(next)}</button>`);
+    buttons.push('<button class="btn-secondary" id="sum-again">🔁 Bu dersi tekrarla</button>');
+    buttons.push('<button class="btn-secondary" id="sum-cert">🎓 Belge</button>');
+    buttons.push('<button class="btn-secondary" id="sum-home">Ana menü</button>');
     const s = $('rd-summary');
     s.innerHTML = `
         <div style="font-size:72px">🏆</div>
@@ -449,17 +562,13 @@ function finishLesson() {
             <div><b>${lesson.helped + lesson.skipped}</b>pekiştirilecek</div>
             <div><b>${state.score}</b>puan</div>
         </div>
-        <div class="sum-actions">
-            ${next ? `<button class="btn-primary" id="sum-next">Yeni harf: ${caseText(next)} ➔</button>` : ''}
-            <button class="btn-secondary" id="sum-again">🔁 Dersi tekrarla</button>
-            <button class="btn-secondary" id="sum-cert">🎓 Belge</button>
-            <button class="btn-secondary" id="sum-home">Ana menü</button>
-        </div>`;
+        <div class="sum-actions">${buttons.join('')}</div>`;
     s.classList.remove('hidden');
-    $('sum-again').onclick = startLesson;
+    $('sum-continue').onclick = startLesson;
+    $('sum-again').onclick = () => { if (m.mode === 'path') { state.pathStep = m.from; saveState(); } startLesson(); };
     $('sum-home').onclick = () => showScreen('home');
     $('sum-cert').onclick = openCertificate;
-    if (next) $('sum-next').onclick = () => { setKnownThrough(next); startLesson(); };
+    if ($('sum-next')) $('sum-next').onclick = () => { setKnownThrough(next); startLesson(); };
 }
 
 function prevItem() {
@@ -729,7 +838,13 @@ function setupEventListeners() {
     const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
     document.addEventListener('pointerdown', () => Voice.unlock(), { once: true });
 
-    on('letter-grid', 'click', (e) => { const b = e.target.closest('.letter-btn'); if (b) setKnownThrough(b.dataset.letter); });
+    on('letter-grid', 'click', (e) => {
+        const b = e.target.closest('.letter-btn');
+        if (!b) return;
+        if (state.mode === 'focus') toggleFocus(b.dataset.letter);
+        else setKnownThrough(b.dataset.letter);
+    });
+    document.querySelectorAll('.mode-chip').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     on('btn-case-lower', 'click', () => { state.isLowerCase = true; updateCaseButtons(); renderLetterGrid(); saveState(); });
     on('btn-case-upper', 'click', () => { state.isLowerCase = false; updateCaseButtons(); renderLetterGrid(); saveState(); });
     on('parent-mode-toggle', 'change', (e) => { state.isParentMode = e.target.checked; applyParentModeText(); saveState(); });
@@ -754,7 +869,8 @@ function setupEventListeners() {
         if (!confirm('Tüm ilerleme sıfırlanacak. Emin misiniz?')) return;
         state.knownLetters = Curriculum.lettersThrough('t');
         state.score = 0; state.lessons = 0; state.stats = {}; state.activities = [];
-        saveState(); renderLetterGrid(); updateStartButton(); renderDashboard();
+        state.pathStep = 0; state.focusLetters = []; state.mode = 'path';
+        saveState(); renderLetterGrid(); updateStartButton(); renderModePicker(); renderDashboard();
     });
 
     on('btn-listen', 'click', onListenClick);

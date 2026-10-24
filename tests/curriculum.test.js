@@ -83,3 +83,79 @@ test('erken derste (a n) yalnızca hece ve kelime vardır, hata vermez', () => {
     assert.ok(lesson.length >= 2);
     assert.ok(lesson.every((i) => ['ses', 'hece', 'kelime', 'cumle'].includes(i.kind)));
 });
+
+const letterSet = (items) => new Set(items.flatMap((i) => [...C.fold(i.text).replace(/[^a-zçğıöşü]/g, '')]));
+
+test('baştan ilerle: ilk adım en baştaki harflerle (a, n), sonraki adım bir harf ekler', () => {
+    const known = C.lettersThrough('k'); // a n e t i l o k
+    const p = C.buildPath(known, { from: 0, steps: 2 });
+    assert.strictEqual(p.total, 7);
+    assert.deepStrictEqual([p.from, p.to], [0, 2]);
+    const first = p.items.filter((i) => i.chapter === 'a n');
+    assert.ok(first.some((i) => i.kind === 'ses' && i.text === 'a'), 'a sesi');
+    assert.ok(first.some((i) => i.kind === 'ses' && i.text === 'n'), 'n sesi');
+    assert.ok([...letterSet(first)].every((l) => 'an'.includes(l)), 'ilk adımda yalnızca a ve n');
+    const second = p.items.filter((i) => i.chapter === '+e');
+    assert.ok(second.some((i) => i.kind === 'ses' && i.text === 'e'));
+    assert.ok([...letterSet(second)].every((l) => 'ane'.includes(l)), 'ikinci adımda yalnızca a, n, e');
+    assert.ok(second.some((i) => i.kind === 'hece' && i.text.includes('e')));
+});
+
+test('baştan ilerle: tüm adımlar bilinen her harfi kapsar ve tekrar eden öğe yok', () => {
+    const known = C.lettersThrough('k');
+    const seen = new Set();
+    let from = 0, guard = 0;
+    while (guard++ < 10) {
+        const p = C.buildPath(known, { from, steps: 2 });
+        p.items.forEach((i) => seen.add(i.key));
+        p.letters.forEach((l) => seen.add(`odak/${l}`));
+        if (p.to >= p.total) break;
+        from = p.to;
+    }
+    known.slice(1).forEach((l) => assert.ok(seen.has(`odak/${l}`), `${l} için adım yok`));
+    known.forEach((l) => assert.ok(seen.has(`ses/${l}`), `${l} sesi çalışılmıyor`));
+    const keys = C.buildPath(known, { from: 0, steps: 7 }).items.map((i) => i.key);
+    assert.strictEqual(new Set(keys).size, keys.length);
+});
+
+test('baştan ilerle: bitince başa sarar, tek harf ya da boşta boş döner', () => {
+    const known = C.lettersThrough('t');
+    assert.strictEqual(C.buildPath(known, { from: 99 }).from, 0);
+    assert.strictEqual(C.buildPath(['a']).items.length, 0);
+    assert.strictEqual(C.buildPath([]).total, 0);
+});
+
+test('karışık tekrar: yalnızca bilinen harfler, baştaki harfler de gelir', () => {
+    const known = C.lettersThrough('k');
+    const all = new Set();
+    for (let i = 0; i < 30; i++) {
+        const m = C.buildMixed(known);
+        letterSet(m).forEach((l) => { assert.ok(known.includes(l), l); all.add(l); });
+    }
+    assert.ok(all.has('a') && all.has('n'), 'başlangıç harfleri de çalışılmalı');
+});
+
+test('seçtiğim harfler: sesli+sessiz seçilirse heceler yalnızca o harflerden', () => {
+    const known = C.lettersThrough('k');
+    const f = C.buildFocus(known, ['k', 'a']);
+    const syl = f.filter((i) => i.kind === 'hece');
+    assert.ok(syl.length >= 2);
+    syl.forEach((i) => assert.ok([...i.text].every((l) => 'ka'.includes(l)), i.text));
+    assert.ok(syl.some((i) => i.text === 'ka') && syl.some((i) => i.text === 'ak'));
+    assert.deepStrictEqual(f.filter((i) => i.kind === 'ses').map((i) => i.text).sort(), ['a', 'k']);
+    f.filter((i) => i.kind === 'kelime').forEach((i) => assert.ok(/[ka]/.test(i.text)));
+});
+
+test('seçtiğim harfler: yalnızca sessiz seçilirse bilinen seslilerle birleşir', () => {
+    const known = C.lettersThrough('k');
+    const syl = C.buildFocus(known, ['l']).filter((i) => i.kind === 'hece');
+    syl.forEach((i) => assert.ok(i.text.includes('l'), i.text));
+    assert.ok(new Set(syl.map((i) => i.text.replace('l', ''))).size > 2, 'farklı ünlülerle');
+});
+
+test('seçtiğim harfler: bilinmeyen harf yok sayılır, hiç seçim yoksa boş', () => {
+    const known = C.lettersThrough('t');
+    assert.strictEqual(C.buildFocus(known, ['k']).length, 0);
+    assert.strictEqual(C.buildFocus(known, []).length, 0);
+    assert.deepStrictEqual(C.buildFocus(known, ['k', 'n']).filter((i) => i.kind === 'ses').map((i) => i.text), ['n']);
+});
