@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { judge, normalize } = require('../js/judge.js');
+const { judge, normalize, judgeWords, letterAliases } = require('../js/judge.js');
 const C = require('../js/curriculum.js');
 
 const pool = C.generateSyllables(C.lettersThrough('k')).map((s) => s.sequence); // a n e t i l o k
@@ -40,4 +40,22 @@ test('ses yoksa nospeech', () => {
 
 test('alakasız kelime yanlış', () => {
     assert.strictEqual(verdict('ka', ['merhaba']), 'wrong');
+});
+
+test('harf sesi: "m" için "me" ve "em" kabul, başka harf reddedilir', () => {
+    const letters = C.lettersThrough('m');
+    const j = (t, h) => judge(t, h, letters.filter((x) => x !== t), { aliases: letterAliases(t) }).verdict;
+    assert.strictEqual(j('m', ['m']), 'correct');
+    assert.strictEqual(j('m', ['me']), 'correct');
+    assert.strictEqual(j('m', ['em']), 'correct');
+    assert.notStrictEqual(j('m', ['ne']), 'correct');
+});
+
+test('cümle: tüm sözcükler bulunursa doğru, yarısı bulunursa değil', () => {
+    const w = ['anne', 'kalem', 'al'];
+    assert.strictEqual(judgeWords(w, ['anne kalem al']).verdict, 'correct');
+    assert.strictEqual(judgeWords(w, ['Anne, kalem al!']).verdict, 'correct');
+    assert.strictEqual(judgeWords(w, ['anne kalem']).verdict, 'uncertain');
+    assert.strictEqual(judgeWords(w, ['merhaba dünya']).verdict, 'wrong');
+    assert.strictEqual(judgeWords(w, []).verdict, 'nospeech');
 });

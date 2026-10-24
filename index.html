@@ -2,19 +2,20 @@
 <html lang="tr" class="no-js">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#ff6b6b">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Selim Okur">
     <meta name="description" content="1. Sınıf çocukları için Türkçe okuma eğitimi uygulaması">
     <title>Selim Okur - 1. Sınıf Okuma Eğitimi</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23ff6b6b' rx='25'/%3E%3Ctext x='50' y='65' font-size='50' text-anchor='middle' fill='white'%3E📖%3C/text%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="icons/icon-180.png">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="fonts/fonts.css">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="game.css">
 </head>
 <body>
 
@@ -101,16 +102,14 @@
 
             <button id="btn-start" class="btn-primary btn-large disabled shimmer-btn">
                 <span class="btn-icon">▶</span>
-                <span class="btn-text">Oyunu Başlat</span>
+                <span class="btn-text">Dersi Başlat</span>
             </button>
 
             <div class="quick-actions">
-                <button id="btn-parent-dashboard" class="btn-outline">
-                    <span>📊 İlerleme Paneli</span>
-                </button>
-                <button id="btn-settings" class="btn-outline">
-                    <span>⚙ Ayarlar</span>
-                </button>
+                <button id="btn-word-game" class="btn-outline"><span>🧩 Kelime Kur</span></button>
+                <button id="btn-studio" class="btn-outline"><span>🎙 Seslerim</span></button>
+                <button id="btn-parent-dashboard" class="btn-outline"><span>📊 İlerleme</span></button>
+                <button id="btn-settings" class="btn-outline"><span>⚙ Ayarlar</span></button>
             </div>
 
             <p class="footer-note">💡 Harfler Selim'in ders kitabındaki sırayla dizili.</p>
@@ -155,6 +154,11 @@
             </div>
 
             <div class="progress-section">
+                <h3 class="section-title">Pekiştirilecekler</h3>
+                <div class="activity-list" id="weak-list"></div>
+            </div>
+
+            <div class="progress-section">
                 <h3 class="section-title">Son Etkinlikler</h3>
                 <div class="activity-list" id="activity-list">
                     <div class="activity-item empty">Henüz aktivite yok.</div>
@@ -169,100 +173,55 @@
 
     <!-- ========== EKRAN 3: HECE OYUNU ========== -->
     <div id="screen-game" class="screen">
-        <div class="game-container glass-card">
-            <div class="game-header">
-                <button id="btn-game-back" class="btn-icon">↩</button>
-                <div class="game-status">
-                    <div class="status-item">
-                        <span class="status-label">Seviye</span>
-                        <span class="status-value" id="game-level">1</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Puan</span>
-                        <span class="status-value" id="game-score">0</span>
-                    </div>
-                    <div class="status-item streak">
-                        <span class="status-label">Seri</span>
-                        <span class="status-value" id="game-streak">0</span>
-                        <span class="status-emoji">🔥</span>
-                    </div>
+        <div class="rd-shell">
+            <header class="rd-top">
+                <button id="btn-game-back" class="rd-iconbtn" aria-label="Ana menü">↩</button>
+                <ol class="rd-steps" id="rd-steps"></ol>
+                <div class="rd-stars" title="Puan">⭐ <span id="game-score">0</span></div>
+            </header>
+
+            <main class="rd-stage">
+                <div class="rd-mascot">
+                    <div class="speech-bubble" id="speech-bubble"></div>
+                    <span id="character">🦁</span>
                 </div>
-                <button id="btn-game-menu" class="btn-icon">⋮</button>
+                <section class="rd-card" id="rd-card" data-kind="hece" aria-live="polite">
+                    <div class="rd-kind" id="rd-kind">Heceyi oku</div>
+                    <div class="rd-text" id="rd-text"></div>
+                    <div class="rd-hint" id="rd-hint"></div>
+                    <div class="rd-heard" id="rd-heard"></div>
+                </section>
+            </main>
+
+            <div id="parent-check-group" class="rd-parent">
+                <span id="parent-msg">👨‍👧 Veli onayı:</span>
+                <button id="btn-parent-yes" class="yes">✅ Doğru okudu</button>
+                <button id="btn-parent-no" class="no">↻ Tekrar</button>
             </div>
 
-            <div class="syllable-card">
-                <div class="syllable-display-row">
-                    <button type="button" id="btn-prev-syllable" class="btn-syllable-nav btn-prev" title="Önceki Hece">◀</button>
-                    <div class="syllable-display" id="syllable-display">el</div>
-                    <button type="button" id="btn-next-syllable" class="btn-syllable-nav btn-next" title="Sonraki Hece">▶</button>
-                </div>
-                <div class="syllable-type-badge" id="syllable-type">Basit Hece</div>
-                <div class="syllable-hint" id="syllable-hint">Bu heceyi oku</div>
-            </div>
-
-            <div class="character-container">
-                <div class="character" id="character">🦁</div>
-                <div class="speech-bubble" id="speech-bubble"></div>
-                <div class="character-shadow"></div>
-            </div>
-
-            <div class="session-progress">
-                <div class="progress-ring">
-                    <svg class="progress-ring-circle">
-                        <circle class="progress-ring-bg" cx="60" cy="60" r="50"></circle>
-                        <circle class="progress-ring-fill" id="progress-ring-fill" cx="60" cy="60" r="50"></circle>
-                    </svg>
-                    <div class="progress-text">
-                        <span id="session-current">0</span> / <span id="session-total">0</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="action-area">
-                <div id="parent-check-group" class="parent-check-card hidden">
-                    <p class="parent-question">Selim bunu doğru okudu mu?</p>
-                    <div class="parent-buttons">
-                        <button id="btn-parent-yes" class="btn-parent btn-yes">
-                            <span>✅</span>
-                            <span>Evet, Bildi</span>
-                        </button>
-                        <button id="btn-parent-no" class="btn-parent btn-no">
-                            <span>❌</span>
-                            <span>Hayır, Tekrar</span>
-                        </button>
-                    </div>
-                    <div class="parent-nav-actions">
-                        <button type="button" id="btn-parent-next" class="btn-primary btn-next-big hidden">
-                            <span>Sonraki Heceye Geç ➔</span>
-                        </button>
-                    </div>
-                    <p class="parent-hint">Bildi'ye basınca 1 saniye sonra otomatik geçer veya yukarıdaki oklara (▶) basabilirsiniz.</p>
-                </div>
-
-                <div id="auto-check-group" class="listen-card">
-                    <button id="btn-listen" class="btn-listen">
-                        <span class="listen-icon">🎤</span>
-                        <span class="listen-text">Dinliyorum...</span>
-                        <div class="listen-wave">
-                            <div class="wave-bar"></div>
-                            <div class="wave-bar"></div>
-                            <div class="wave-bar"></div>
-                        </div>
-                    </button>
-                    <div id="listen-result" class="listen-result hidden"></div>
-                </div>
-
-                <div class="common-controls">
-                    <button id="btn-repeat" class="btn-secondary">
-                        <span>🔊</span> Dinle
-                    </button>
-                    <button id="btn-next" class="btn-primary btn-next-prominent">
-                        <span>Sonraki Hece ➔</span>
-                    </button>
-                </div>
-            </div>
+            <footer class="rd-controls">
+                <button id="btn-repeat" class="rd-btn" title="Dinle (D)">🔊 Dinle</button>
+                <button id="btn-listen" class="rd-mic" title="Oku (Boşluk)">
+                    <span class="mic-icon">🎤</span><span class="listen-text">Oku</span>
+                </button>
+                <button id="btn-next" class="rd-btn" title="Atla (→)">Atla ➔</button>
+            </footer>
 
             <div id="feedback-message" class="feedback-message hidden"></div>
+            <div id="rd-summary" class="rd-summary hidden"></div>
+        </div>
+    </div>
+
+    <!-- ========== SESLERİM (veli kayıt stüdyosu) ========== -->
+    <div id="screen-studio" class="screen">
+        <div class="studio-card">
+            <div class="studio-head">
+                <button id="btn-studio-back" class="rd-iconbtn" aria-label="Geri">↩</button>
+                <h2>🎙 Seslerim</h2>
+            </div>
+            <p class="studio-intro">Harf, hece ve kelimeleri kendi sesinle kaydedersen uygulama onu çalar. Kayıt yoksa hazır robot ses kullanılır. Kaydetmek için ⏺'e bas, bitince tekrar bas.</p>
+            <div class="studio-tabs" id="studio-tabs"></div>
+            <div class="studio-list" id="studio-list"></div>
         </div>
     </div>
 
@@ -409,6 +368,32 @@
             </div>
 
             <div class="settings-group">
+                <h3 class="settings-group-title">Mikrofon ve Tanıma</h3>
+                <div class="setting-item">
+                    <label>Tanıma yöntemi</label>
+                    <select id="setting-engine">
+                        <option value="auto" selected>Otomatik (önerilen)</option>
+                        <option value="voice">Sadece ses eşleştirme (çevrimdışı)</option>
+                        <option value="web">Sadece tarayıcı konuşma tanıma</option>
+                    </select>
+                    <p class="setting-desc" id="engine-note"></p>
+                </div>
+                <div class="setting-item">
+                    <label>Mikrofon testi</label>
+                    <div class="mic-test">
+                        <button type="button" id="btn-mic-test" class="btn-outline" style="width:100%">🎤 Mikrofonu test et</button>
+                        <div class="meter"><i id="mic-meter"></i></div>
+                        <div class="mic-test-out" id="mic-test-out">Düğmeye basıp "ka" gibi bir hece söyle.</div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>Selim'in sesinden öğrenilen kayıt</label>
+                    <p class="setting-desc" id="template-count">0</p>
+                    <button type="button" id="btn-clear-templates" class="btn-outline" style="width:100%">Öğrenilenleri sil</button>
+                </div>
+            </div>
+
+            <div class="settings-group">
                 <h3 class="settings-group-title">Geliştirici</h3>
                 <div class="setting-item">
                     <label>Ses tanıma günlüğü</label>
@@ -429,16 +414,16 @@
 
     <script src="js/curriculum.js"></script>
     <script src="js/judge.js"></script>
-    <script src="app.js?v=9"></script>
+    <script src="js/dsp.js"></script>
+    <script src="js/verify.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/mic.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/recognizer.js"></script>
+    <script src="app.js?v=10"></script>
     <script>
-        // Unregister service worker during development so changes show immediately
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(regs => {
-                for (let reg of regs) reg.unregister();
-            });
-        }
-        if ('caches' in window) {
-            caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k))));
+        if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
 </body>

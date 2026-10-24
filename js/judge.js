@@ -73,13 +73,14 @@
      * @param {string[]} pool   çocuğun şu an karşılaşabileceği diğer heceler
      * @returns {{verdict:'correct'|'uncertain'|'wrong'|'nospeech', heard:string, best:number, rival:string|null}}
      */
-    function judge(target, heard, pool = []) {
+    function judge(target, heard, pool = [], { aliases = [] } = {}) {
         const t = normalize(target);
         const cands = (heard || []).map(normalize).filter(Boolean);
         if (cands.length === 0) return { verdict: 'nospeech', heard: '', best: Infinity, rival: null };
 
         const costOf = (word) => Math.min(...cands.map((c) => bestCost(word, c)));
-        const best = costOf(t);
+        // aliases: aynı sesin kabul edilen yazımları (örn. harf sesi "m" için "me", "em")
+        const best = Math.min(costOf(t), ...aliases.map(normalize).filter(Boolean).map(costOf));
         let rival = null, rivalCost = Infinity;
         pool.map(normalize).filter((p) => p && p !== t).forEach((p) => {
             const c = costOf(p);
@@ -101,5 +102,37 @@
         return { verdict, heard: cands[0], best, rival: rivalCost < Infinity ? rival : null };
     }
 
-    return { normalize, distance, judge };
+    /** Harf sesi için kabul edilen tanıyıcı yazımları: tek başına söylenen "m" sık "me"/"em" duyulur. */
+    function letterAliases(letter) {
+        const l = normalize(letter);
+        if ('aeıioöuü'.includes(l)) return [l];
+        return [l, l + 'e', 'e' + l, l + 'ı', 'ı' + l, l + 'a', l + 'i'];
+    }
+
+    /**
+     * Cümle/kelime dizisi: hedef sözcüklerin kaçı duyulanlar içinde bulundu?
+     * @returns {{verdict, heard, found, total}}
+     */
+    function judgeWords(targetWords, heard) {
+        const cands = (heard || []).map(normalize).filter(Boolean);
+        if (cands.length === 0) return { verdict: 'nospeech', heard: '', found: 0, total: targetWords.length };
+        const tw = targetWords.map(normalize);
+        let bestFound = 0;
+        cands.forEach((c) => {
+            const toks = c.split(' ').filter(Boolean);
+            let found = 0;
+            const used = new Set();
+            tw.forEach((w) => {
+                let bi = -1, bc = Infinity;
+                toks.forEach((tok, i) => { if (!used.has(i)) { const d = distance(w, tok); if (d < bc) { bc = d; bi = i; } } });
+                if (bi >= 0 && bc <= acceptLimit(w.length)) { used.add(bi); found++; }
+            });
+            bestFound = Math.max(bestFound, found);
+        });
+        const ratio = bestFound / tw.length;
+        const verdict = ratio >= 0.99 ? 'correct' : ratio >= 0.6 ? 'uncertain' : 'wrong';
+        return { verdict, heard: cands[0], found: bestFound, total: tw.length };
+    }
+
+    return { normalize, distance, judge, judgeWords, letterAliases };
 });

@@ -53,3 +53,33 @@ test('pickSyllable: kolaylar önce, yeni harf ağırlıklı, istisna hariç', ()
     for (let i = 0; i < 50; i++) assert.notStrictEqual(C.pickSyllable(pool, { exclude: first }).id, first.id);
     assert.strictEqual(C.pickSyllable([], {}), null);
 });
+
+test('cümleler: tüm sözcükler ünlü içerir ve harfler sıra içinde', () => {
+    C.SENTENCES.forEach((s) => {
+        assert.ok(s.stage > 0 && s.stage <= 29);
+        s.words.forEach((w) => assert.ok([...w.toLocaleLowerCase('tr-TR')].some(C.isVowel), s.text));
+    });
+    const early = C.sentencesFor(C.lettersThrough('t'));
+    early.forEach((s) => assert.ok(s.stage <= 4));
+});
+
+test('buildLesson: ses -> hece -> kelime -> cümle sırası ve yalnızca bilinen harfler', () => {
+    const known = C.lettersThrough('m');
+    const lesson = C.buildLesson(known);
+    const kinds = lesson.map((i) => i.kind);
+    assert.strictEqual(kinds[0], 'ses');
+    assert.strictEqual(lesson[0].text, 'm');
+    const order = ['ses', 'hece', 'kelime', 'cumle'];
+    for (let i = 1; i < kinds.length; i++) assert.ok(order.indexOf(kinds[i]) >= order.indexOf(kinds[i - 1]));
+    lesson.forEach((i) => [...C.fold(i.text).replace(/[^a-zçğıöşü]/g, '')]
+        .forEach((ch) => assert.ok(known.includes(ch), `${i.text}: ${ch}`)));
+    assert.ok(lesson.filter((i) => i.kind === 'hece').length > 0);
+    assert.ok(lesson.some((i) => i.kind === 'cumle'));
+    assert.strictEqual(C.buildLesson([]).length, 0);
+});
+
+test('erken derste (a n) yalnızca hece ve kelime vardır, hata vermez', () => {
+    const lesson = C.buildLesson(C.lettersThrough('n'));
+    assert.ok(lesson.length >= 2);
+    assert.ok(lesson.every((i) => ['ses', 'hece', 'kelime', 'cumle'].includes(i.kind)));
+});

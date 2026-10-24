@@ -37,7 +37,26 @@
         'e-mek', 'ko-mik', 'a-tom'
     ];
 
+    // Kısa cümleler (yalnızca bilinen harflerle okunabilen olanlar derse girer).
+    const RAW_SENTENCES = [
+        'Ela anlat.', 'Ali anlat.', 'Anne mutlu.', 'Ona kalem al.', 'Anne kalem al.', 'Anne ekmek al.',
+        'Anne lale al.', 'Ali kutu al.', 'Tuna kutu al.', 'Nur motor al.', 'Kemal limon al.',
+        'Anne mantı al.', 'Kuru ot ak.', 'Ali okula kalem al.', 'Tuna oku.', 'Ela tane al.'
+    ];
+
     function fold(s) { return s.toLocaleLowerCase(TR); }
+
+    function stageOf(text) {
+        let stage = 0;
+        [...fold(text).replace(/[^a-zçğıöşü]/g, '')].forEach((l) => { stage = Math.max(stage, LETTER_ORDER.indexOf(l) + 1); });
+        return stage;
+    }
+
+    const SENTENCES = RAW_SENTENCES.map((text) => ({
+        text,
+        words: text.replace(/[.!?,]/g, '').split(/\s+/),
+        stage: stageOf(text)
+    }));
 
     const LEXICON = RAW_WORDS.map((raw) => {
         const parts = raw.split('-');
@@ -104,5 +123,57 @@
         return LEXICON.filter((w) => w.stage <= stage && w.syllables.length >= minSyllables);
     }
 
-    return { LETTER_ORDER, VOWELS, LEXICON, isVowel, isConsonant, lettersThrough, normalizeKnown, generateSyllables, pickSyllable, wordsFor };
+    /** Bilinen harflerle okunabilen cümleler. */
+    function sentencesFor(knownLetters) {
+        const stage = normalizeKnown(knownLetters).length;
+        return SENTENCES.filter((x) => x.stage <= stage);
+    }
+
+    function shuffle(arr, rng) {
+        const a = arr.slice();
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(rng() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    /**
+     * Ses temelli cümle yöntemi akışı: yeni harfin sesi -> hece -> kelime -> cümle.
+     * Her öğe: { kind, text, units, key } ; key ses dosyası/kayıt anahtarıdır.
+     */
+    function buildLesson(knownLetters, { rng = Math.random, counts = {} } = {}) {
+        const known = normalizeKnown(knownLetters);
+        if (known.length === 0) return [];
+        const n = { ses: 1, hece: 8, kelime: 6, cumle: 3, ...counts };
+        const focus = known[known.length - 1];
+        const items = [];
+
+        items.push({ kind: 'ses', text: focus, units: [focus], key: `ses/${focus}` });
+
+        const pool = generateSyllables(known).filter((s) => s.difficulty === 'Simple' && s.type !== 'V');
+        const withFocus = shuffle(pool.filter((s) => s.sequence.includes(focus)), rng);
+        const review = shuffle(pool.filter((s) => !s.sequence.includes(focus)), rng);
+        const syl = withFocus.slice(0, Math.ceil(n.hece * 0.65)).concat(review).slice(0, n.hece);
+        shuffle(syl, rng).forEach((s) => items.push({ kind: 'hece', text: s.sequence, units: [s.sequence], key: `hece/${s.sequence}` }));
+
+        const words = wordsFor(known);
+        const wFocus = shuffle(words.filter((w) => w.sequence.includes(focus)), rng);
+        const wRest = shuffle(words.filter((w) => !w.sequence.includes(focus)), rng);
+        wFocus.concat(wRest).slice(0, n.kelime).forEach((w) =>
+            items.push({ kind: 'kelime', text: w.sequence, units: w.syllables, key: `kelime/${w.sequence}` }));
+
+        const sents = sentencesFor(known);
+        const sFocus = shuffle(sents.filter((x) => x.text.toLocaleLowerCase(TR).includes(focus)), rng);
+        const sRest = shuffle(sents.filter((x) => !x.text.toLocaleLowerCase(TR).includes(focus)), rng);
+        sFocus.concat(sRest).slice(0, n.cumle).forEach((x) =>
+            items.push({ kind: 'cumle', text: x.text, units: x.words, key: `cumle/${slug(x.text)}` }));
+        return items;
+    }
+
+    function slug(text) {
+        return fold(text).replace(/[.!?,]/g, '').trim().replace(/\s+/g, '_');
+    }
+
+    return { LETTER_ORDER, VOWELS, LEXICON, SENTENCES, sentencesFor, buildLesson, slug, stageOf, fold, isVowel, isConsonant, lettersThrough, normalizeKnown, generateSyllables, pickSyllable, wordsFor };
 });

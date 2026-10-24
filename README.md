@@ -1,34 +1,45 @@
-# Selim Okur - 1. Sınıf Türkçe Okuma Eğitimi Uygulaması 📖
+# Selim Okur - 1. Sınıf Türkçe Okuma Uygulaması 📖
 
-1. Sınıf öğrencileri için tasarlanmış, MEB müfredatına ve ses temelli okuma yöntemine uygun gamified (oyunlaştırılmış) Türkçe okuma eğitimi web uygulaması.
+Ses temelli cümle yöntemine uygun okuma dersi: **ses → hece → kelime → cümle**. Harf sırası Selim'in ders kitabına göre
+(`a n e t i l o k u r ı m …`, `js/curriculum.js`). Giriş ekranında kitapta öğrenilen **son harfe** dokunmak yeterli.
 
-## ✨ Özellikler
+## Nasıl çalışır
 
-- **Ders kitabı sırası:** Harfler Selim'in kitabındaki sırayla (`a n e t i l o k u r ı m …`) dizilir; son öğrenilen harfe dokunmak yeterlidir. Sıra `js/curriculum.js` içinde ayarlanır (ilk 12 harf kitaptan, kalanı tahmini).
-- **Fonetik hakem:** `js/judge.js`, ses tanıyıcının metnini hedef ve komşu hecelerle ses benzerliğine göre karşılaştırır; emin değilse veliye sorar.
-- **1. Sınıf Uyumlu Harf & Hece Formatı:** Çocukların defterlerinde öğrendiği küçük harf odaklı yapı (`a, e, l, m` & `el, al, ma...`). Büyük/Küçük harf geçiş desteği.
-- **Gerçek Ses Tanıma (Web Speech API):** Çocuğun mikrofondan okuduğu heceyi Türkçe dil desteğiyle canlı tanıma ve değerlendirme.
-- **Veli Onayı Modu & Hızlı Navigasyon:** Veli tek tıkla (`✅ Evet, Bildi`) onaylayabilir, sistem tebrik edip otomatik bir sonraki heceye geçer veya kart üzerindeki oklarla (`◀` / `▶`) serbestçe ilerlenebilir.
-- **Kelime Kurma Oyunu:** Öğrenilen hecelerle etkileşimli kelime tamamlama.
-- **Veli İlerleme Paneli:** Hangi harflerin ve hecelerin öğrenildiğini takip eden başarı ve istatistik paneli.
-- **Başarı Belgesi:** Tamamlanan hedefler için yazdırılabilir dijital sertifika.
+- **Ders:** Yeni harfin sesi, o harfli heceler, kelimeler ve kısa cümleler. Her adımda "Dinle", "Oku" (mikrofon) ve veli onayı.
+- **Dinleme (üç katman):**
+  1. Tarayıcı konuşma tanıma (Chrome/Edge) → `js/judge.js` ile hedef ve komşu hecelere göre ses benzerliği.
+  2. Çevrimdışı ses eşleştirme (MFCC + DTW, `js/dsp.js`): Selim doğru okudukça (ya da veli onayladıkça) sesi şablon olarak
+     saklanır; birkaç okumadan sonra tanıma belirgin iyileşir. Model indirmez, iPad'de de çalışır.
+  3. Veli onayı: emin olunmayan her durumda sorulur; çocuk yanlış cezalandırılmaz. Karar birleştirme: `js/verify.js`.
+- **Ses:** Harf sesleri, heceler, kelimeler ve cümleler `audio/` altında hazır. Veli **Seslerim** ekranından kendi sesiyle
+  kaydedebilir; kayıt her zaman önceliklidir.
+- **Mikrofon testi:** Ayarlar → Mikrofon ve Tanıma.
 
-## 🚀 Çalıştırma
-
-Projeyi yerel ortamda çalıştırmak için:
+## Çalıştırma
 
 ```bash
-# Sunucuyu başlatın
-node server.js
+node server.js          # http://localhost:3000 (mikrofon için localhost yeterli)
+npm test                # birim testleri
 ```
 
-Tarayıcınızda açın:
-`http://localhost:3000`
+## Araçlar (`tools/`)
 
-## 🛠 Teknolojiler
+| Komut | Ne yapar |
+|---|---|
+| `node tools/make_audio.js [--cvc-through=m] [--voice=tr+f3] [--force]` | `espeak-ng` + `ffmpeg` ile `audio/` üretir. Daha doğal bir TTS kullanacaksan aynı dosya adlarıyla `audio/<tür>/<ad>.mp3` koy. |
+| `node tools/benchmark_synth.js m` | Ses eşleştirmenin sentetik ölçümü (farklı espeak sesleri = farklı konuşmacı). |
+| `python3 tools/build_artifact.py <klasör> --letters=12` | Tek dosyalı yayın sürümü. |
 
-- HTML5, CSS3 (Modern Responsive Tasarım & Animasyonlar)
-- Vanilla JavaScript
-- Web Speech Recognition API (`tr-TR`)
-- Web Audio API (Ses efektleri & synthesizer)
-- Node.js (Statik sunucu & minimal API)
+Sentetik ölçüm (72 hece): 1 yabancı şablonla %43, 2 şablonla %86, 3 şablonla %99 doğru. Bu, yöntemin kaba tutarlılığıdır; gerçek
+çocuk sesiyle doğruluk için Ayarlar'dan tanıma günlüğünü indirip inceleyin.
+
+## iPad / telefon
+
+Mikrofon için HTTPS gerekir. `.github/workflows/pages.yml` ile GitHub Pages'e yayınlanır (repo ayarlarında Pages kaynağı
+"GitHub Actions" olmalı, `main` dalına gönderince yayınlanır). Safari'de "Ana Ekrana Ekle" ile uygulama gibi açılır ve çevrimdışı çalışır.
+iPad'de tarayıcı konuşma tanıma güvenilir olmadığı için yalnızca ses eşleştirme + veli onayı kullanılır.
+
+## Yapı
+
+`js/curriculum.js` müfredat · `js/judge.js` fonetik hakem · `js/dsp.js` MFCC/DTW · `js/verify.js` karar birleştirme ·
+`js/mic.js` yakalama · `js/recognizer.js` dinleme ve şablonlar · `js/audio.js` ses bankası · `js/store.js` IndexedDB · `app.js` arayüz.

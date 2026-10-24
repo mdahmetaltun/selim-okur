@@ -1,63 +1,46 @@
 /**
- * Selim Okur - 1. Sınıf Okuma Eğitimi Uygulaması
- * Gerçek Web Speech API Ses Tanıma ve 1. Sınıf Küçük Harf Desteği
+ * Selim Okur - 1. Sınıf Okuma Eğitimi
+ * Ses temelli cümle yöntemi: ses -> hece -> kelime -> cümle.
+ * Modüller: Curriculum (müfredat), Judge/Verify/DSP (karar), Mic/Recognizer (dinleme), Voice (ses bankası).
  */
 
-// Müfredat (js/curriculum.js) ve hakem (js/judge.js) önceden yüklenir
-const TURKISH_VOWELS = Curriculum.VOWELS;
+const TR = 'tr-TR';
 const isTurkishVowel = (ch) => !!ch && Curriculum.isVowel(ch);
 const isTurkishConsonant = (ch) => !!ch && Curriculum.isConsonant(ch);
 
-function formatLetterCase(str) {
-    if (!str) return '';
-    return state.isLowerCase ? str.toLocaleLowerCase('tr-TR') : str.toLocaleUpperCase('tr-TR');
-}
+const KIND_LABEL = { ses: 'Bu harfin sesini söyle', hece: 'Heceyi oku', kelime: 'Kelimeyi oku', cumle: 'Cümleyi oku' };
+const KIND_HINT = {
+    ses: 'Önce dinle, sonra sen söyle',
+    hece: 'Harfleri birleştirip oku',
+    kelime: 'Hece hece oku, sonra birleştir',
+    cumle: 'Kelimeleri sırayla oku'
+};
+const STEP_NAME = { ses: 'Ses', hece: 'Hece', kelime: 'Kelime', cumle: 'Cümle' };
+const POINTS = { ses: 5, hece: 10, kelime: 15, cumle: 25 };
 
-// Game state
+// ---------- Durum ----------
 const state = {
-    knownLetters: Curriculum.lettersThrough('t'), // ders kitabı sırası: a n e t ...
-    isLowerCase: true, // 1. sınıf için varsayılan küçük harf
-    syllables: [],
-    currentSyllable: null,
-    currentWord: null,
-    wordParts: [],
-    placedSyllables: [],
-    level: 1,
+    knownLetters: Curriculum.lettersThrough('t'),
+    isLowerCase: true,
     score: 0,
-    streak: 0,
-    masteredHeceCount: 0,
-    masteredKelimeCount: 0,
-    totalHeceCount: 0,
-    totalKelimeCount: 0,
+    lessons: 0,
     isParentMode: false,
     isAutoMode: true,
-    gamePhase: 'HOME',
     childName: 'Selim',
     character: '🦁',
-    speechRate: 1.0,
     sfxEnabled: true,
-    bgmEnabled: false,
+    engine: 'auto',
+    stats: {},       // anahtar -> { ok, tries }
     activities: []
 };
+const PERSIST = ['knownLetters', 'isLowerCase', 'score', 'lessons', 'isParentMode', 'isAutoMode', 'childName', 'character', 'sfxEnabled', 'engine', 'stats', 'activities'];
 
-// DOM elements proxy to safely access any ID in kebab-case or camelCase
+const $ = (id) => document.getElementById(id);
 const screens = {};
-const elements = new Proxy({}, {
-    get: (target, prop) => {
-        if (typeof prop !== 'string') return target[prop];
-        if (target[prop]) return target[prop];
-        let el = document.getElementById(prop);
-        if (!el) {
-            const kebab = prop.replace(/([a-z0-9]|(?=[A-Z]))([A-Z])/g, '$1-$2').toLowerCase();
-            el = document.getElementById(kebab);
-        }
-        if (el) target[prop] = el;
-        return el;
-    }
-});
+let autoAdvanceTimer = null;
 
 function init() {
-    cacheScreens();
+    ['home', 'dashboard', 'game', 'word', 'certificate', 'settings', 'studio'].forEach((n) => { screens[n] = $(`screen-${n}`); });
     loadState();
     renderLetterGrid();
     updateCaseButtons();
@@ -65,127 +48,87 @@ function init() {
     renderDashboard();
     setupEventListeners();
     showScreen('home');
-}
-
-function cacheScreens() {
-    ['home', 'dashboard', 'game', 'word', 'certificate', 'settings'].forEach(name => {
-        screens[name] = document.getElementById(`screen-${name}`);
-    });
+    Promise.all([Voice.init(), Templates.load()]).then(refreshSettingsInfo);
 }
 
 function loadState() {
     try {
-        const saved = localStorage.getItem('selim_okur_state');
+        const saved = JSON.parse(localStorage.getItem('selim_okur_state') || 'null');
         if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed.knownLetters) && parsed.knownLetters.length > 0) {
-                state.knownLetters = Curriculum.normalizeKnown(parsed.knownLetters);
-            }
-            state.level = parsed.level || 1;
-            state.score = parsed.score || 0;
-            state.streak = parsed.streak || 0;
-            state.masteredHeceCount = parsed.masteredHeceCount || 0;
-            state.masteredKelimeCount = parsed.masteredKelimeCount || 0;
-            state.childName = parsed.childName || 'Selim';
-            state.character = parsed.character || '🦁';
-            state.speechRate = parsed.speechRate || 1.0;
-            state.sfxEnabled = parsed.sfxEnabled !== undefined ? parsed.sfxEnabled : true;
-            state.isAutoMode = parsed.isAutoMode !== undefined ? parsed.isAutoMode : true;
-            state.isParentMode = parsed.isParentMode !== undefined ? parsed.isParentMode : false;
-            state.isLowerCase = parsed.isLowerCase !== undefined ? parsed.isLowerCase : true;
-            state.activities = parsed.activities || [];
-
-            const nameInput = document.getElementById('setting-child-name');
-            if (nameInput) nameInput.value = state.childName;
-            const charInput = document.getElementById('setting-character');
-            if (charInput) charInput.value = state.character;
-            const rateInput = document.getElementById('setting-speech-rate');
-            if (rateInput) rateInput.value = state.speechRate;
-            const sfxInput = document.getElementById('setting-sfx');
-            if (sfxInput) sfxInput.checked = state.sfxEnabled;
-            const autoInput = document.getElementById('setting-auto-mode');
-            if (autoInput) autoInput.checked = state.isAutoMode;
-            const parentToggle = document.getElementById('parent-mode-toggle');
-            if (parentToggle) parentToggle.checked = state.isParentMode;
+            PERSIST.forEach((k) => { if (saved[k] !== undefined) state[k] = saved[k]; });
+            state.knownLetters = Curriculum.normalizeKnown(state.knownLetters);
+            if (state.knownLetters.length === 0) state.knownLetters = Curriculum.lettersThrough('t');
         }
-    } catch (e) {
-        console.error('Load error:', e);
-    }
+    } catch (e) { console.error('Load error:', e); }
+    $('setting-child-name').value = state.childName;
+    $('setting-character').value = state.character;
+    $('setting-sfx').checked = state.sfxEnabled;
+    $('setting-auto-mode').checked = state.isAutoMode;
+    $('setting-engine').value = state.engine;
+    $('parent-mode-toggle').checked = state.isParentMode;
+    applyParentModeText();
+    $('character').textContent = state.character;
 }
 
 function saveState() {
     try {
-        localStorage.setItem('selim_okur_state', JSON.stringify(state));
-    } catch (e) {
-        console.error('Save error:', e);
-    }
+        const out = {};
+        PERSIST.forEach((k) => { out[k] = state[k]; });
+        localStorage.setItem('selim_okur_state', JSON.stringify(out));
+    } catch (e) { console.error('Save error:', e); }
 }
 
 function addActivity(type, text) {
-    state.activities.unshift({ type, text, time: new Date().toLocaleTimeString('tr-TR') });
+    state.activities.unshift({ type, text, time: new Date().toLocaleString(TR, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' }) });
     if (state.activities.length > 50) state.activities.pop();
     saveState();
-    renderDashboard();
 }
 
 function showScreen(name) {
-    Object.values(screens).forEach(s => {
-        if (s) s.classList.remove('active');
-    });
+    Object.values(screens).forEach((s) => s && s.classList.remove('active'));
     if (screens[name]) screens[name].classList.add('active');
     if (name === 'dashboard') renderDashboard();
-    if (name === 'home') {
-        const homeUserName = document.getElementById('home-user-name');
-        if (homeUserName) homeUserName.textContent = state.childName;
-    }
+    if (name === 'home') $('home-user-name').textContent = state.childName;
+    if (name === 'settings') refreshSettingsInfo();
+    if (name !== 'game') { Voice.stop(); if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer); }
 }
 
-// Letter picker: kitaptaki sırayla dizilir; bir harfe dokunmak "buraya kadar öğrendi" demektir
+const caseText = (s) => (state.isLowerCase ? s : s.toLocaleUpperCase(TR));
+
+// ---------- Harf seçici ----------
 function renderLetterGrid() {
-    const grid = elements['letter-grid'];
-    if (!grid) return;
+    const grid = $('letter-grid');
     grid.innerHTML = '';
+    const last = state.knownLetters[state.knownLetters.length - 1];
     Curriculum.LETTER_ORDER.forEach((letter, i) => {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'letter-btn' + (isTurkishVowel(letter) ? ' vowel-btn' : ' consonant-btn');
         btn.dataset.letter = letter;
-        const mainChar = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
-        const subChar = state.isLowerCase ? letter.toLocaleUpperCase('tr-TR') : letter;
-        btn.innerHTML = `<span class="letter-main">${mainChar}</span><span class="letter-sub">${subChar}</span>`;
+        const main = state.isLowerCase ? letter : letter.toLocaleUpperCase(TR);
+        const sub = state.isLowerCase ? letter.toLocaleUpperCase(TR) : letter;
+        btn.innerHTML = `<span class="letter-main">${main}</span><span class="letter-sub">${sub}</span>`;
         btn.title = `${i + 1}. harf`;
         if (state.knownLetters.includes(letter)) btn.classList.add('selected');
-        if (letter === state.knownLetters[state.knownLetters.length - 1]) btn.classList.add('last-known');
+        if (letter === last) btn.classList.add('last-known');
         grid.appendChild(btn);
     });
     renderSelectedTags();
 }
 
-function updateCaseButtons() {
-    const btnLower = elements['btn-case-lower'];
-    const btnUpper = elements['btn-case-upper'];
-    if (btnLower) btnLower.classList.toggle('active', state.isLowerCase);
-    if (btnUpper) btnUpper.classList.toggle('active', !state.isLowerCase);
-}
-
 function renderSelectedTags() {
-    const container = elements['selected-tags'];
-    if (!container) return;
-    container.innerHTML = '';
-    const vowelCount = state.knownLetters.filter(isTurkishVowel).length;
-    const consonantCount = state.knownLetters.filter(isTurkishConsonant).length;
-    if (elements['selected-vowel-count']) elements['selected-vowel-count'].textContent = vowelCount;
-    if (elements['selected-consonant-count']) elements['selected-consonant-count'].textContent = consonantCount;
-
-    state.knownLetters.forEach(letter => {
+    const c = $('selected-tags');
+    c.innerHTML = '';
+    $('selected-vowel-count').textContent = state.knownLetters.filter(isTurkishVowel).length;
+    $('selected-consonant-count').textContent = state.knownLetters.filter(isTurkishConsonant).length;
+    state.knownLetters.forEach((l) => {
         const tag = document.createElement('div');
         tag.className = 'tag';
-        tag.textContent = state.isLowerCase ? letter : letter.toLocaleUpperCase('tr-TR');
-        container.appendChild(tag);
+        tag.textContent = caseText(l);
+        c.appendChild(tag);
     });
 }
 
-// Bir harfe dokunmak, sıradaki o harfe kadar olan tüm harfleri bilinen yapar
 function setKnownThrough(letter) {
     state.knownLetters = Curriculum.lettersThrough(letter);
     renderLetterGrid();
@@ -193,237 +136,150 @@ function setKnownThrough(letter) {
     saveState();
 }
 
+function updateCaseButtons() {
+    $('btn-case-lower').classList.toggle('active', state.isLowerCase);
+    $('btn-case-upper').classList.toggle('active', !state.isLowerCase);
+}
+
 function updateStartButton() {
-    const hasVowel = state.knownLetters.some(isTurkishVowel);
-    const hasConsonant = state.knownLetters.some(isTurkishConsonant);
-    const canStart = hasVowel && hasConsonant;
-    if (elements['btn-start']) {
-        elements['btn-start'].disabled = !canStart;
-        elements['btn-start'].classList.toggle('disabled', !canStart);
-    }
+    const ok = state.knownLetters.some(isTurkishVowel) && state.knownLetters.some(isTurkishConsonant);
+    $('btn-start').disabled = !ok;
+    $('btn-start').classList.toggle('disabled', !ok);
 }
 
-// Game Loop
-function startGame() {
-    state.syllables = Curriculum.generateSyllables(state.knownLetters);
-    if (state.syllables.length === 0) {
-        showFeedback('Önce kitapta öğrenilen son harfe dokun (en az bir sesli ve bir sessiz harf).', 'error');
-        return;
-    }
-    state.level = 1;
-    state.score = 0;
-    state.streak = 0;
-    state.masteredHeceCount = 0;
-    state.totalHeceCount = state.syllables.length;
-    updateDisplays();
+// ---------- Ders akışı ----------
+const lesson = { items: [], idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false };
+
+function startLesson() {
+    Voice.unlock();
+    const items = Curriculum.buildLesson(state.knownLetters);
+    if (items.length === 0) { alert('Önce kitapta öğrenilen son harfe dokun.'); return; }
+    Object.assign(lesson, { items, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false });
+    $('rd-summary').classList.add('hidden');
     showScreen('game');
-    nextSyllable();
-    addActivity('start', 'Okuma oyunu başlatıldı');
+    $('character').textContent = state.character;
+    renderSteps();
+    showItem(0);
+    addActivity('start', `Ders başladı (${caseText(state.knownLetters[state.knownLetters.length - 1])} harfine kadar)`);
 }
 
-let autoAdvanceTimer = null;
-let syllableHistory = [];
+const currentItem = () => lesson.items[lesson.idx];
+const poolFor = (item) => lesson.items.filter((i) => i.kind === item.kind && i.key !== item.key);
 
-function prevSyllable() {
-    if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
-    if (syllableHistory.length > 0) {
-        state.currentSyllable = syllableHistory.pop();
-        renderCurrentSyllable();
+function renderSteps() {
+    const kinds = [...new Set(lesson.items.map((i) => i.kind))];
+    const ol = $('rd-steps');
+    ol.innerHTML = '';
+    kinds.forEach((k) => {
+        const li = document.createElement('li');
+        li.className = 'rd-step';
+        li.dataset.kind = k;
+        li.textContent = STEP_NAME[k];
+        ol.appendChild(li);
+    });
+    updateSteps();
+}
+
+function updateSteps() {
+    const cur = currentItem();
+    document.querySelectorAll('.rd-step').forEach((li) => {
+        const k = li.dataset.kind;
+        const all = lesson.items.filter((i) => i.kind === k);
+        const doneN = all.filter((i) => lesson.items.indexOf(i) < lesson.idx).length;
+        li.style.setProperty('--p', (doneN / all.length).toFixed(2));
+        li.classList.toggle('done', doneN === all.length);
+        li.classList.toggle('current', !!cur && cur.kind === k);
+    });
+}
+
+function renderCardText(item) {
+    const el = $('rd-text');
+    if (item.kind === 'ses') {
+        const main = state.isLowerCase ? item.text : item.text.toLocaleUpperCase(TR);
+        const pair = state.isLowerCase ? item.text.toLocaleUpperCase(TR) : item.text;
+        el.innerHTML = `<span>${main}</span><span class="pair">${pair}</span>`;
+    } else if (item.kind === 'kelime') {
+        el.innerHTML = item.units.map((u) => `<span class="syl">${caseText(u)}</span>`).join('<span class="dot">·</span>');
+    } else if (item.kind === 'cumle') {
+        el.innerHTML = item.units.map((w) => `<span class="word">${caseText(w)}</span>`).join('');
     } else {
-        showFeedback('Zaten ilk hecedesiniz!', 'info');
+        el.textContent = caseText(item.text);
     }
 }
 
-function nextSyllable() {
+function showItem(i) {
     if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
-    if (isListening && recognitionInstance) {
-        try { recognitionInstance.stop(); } catch (e) {}
-        isListening = false;
-    }
-
-    if (state.currentSyllable) {
-        syllableHistory.push(state.currentSyllable);
-        if (syllableHistory.length > 30) syllableHistory.shift();
-    }
-
-    if (state.masteredHeceCount >= state.totalHeceCount) {
-        completeGame();
-        return;
-    }
-    const focusLetter = state.knownLetters[state.knownLetters.length - 1];
-    const target = Curriculum.pickSyllable(state.syllables, { focusLetter, exclude: state.currentSyllable });
-    state.currentSyllable = target;
-    renderCurrentSyllable();
-}
-
-function renderCurrentSyllable() {
-    const target = state.currentSyllable;
-    if (!target) return;
-
-    elements['game-level'].textContent = state.level;
-    elements['syllable-display'].textContent = formatLetterCase(target.sequence);
-    elements['syllable-type'].textContent = target.difficulty === 'Simple' ? 'Basit Hece' : 'Orta Hece';
-    elements['syllable-hint'].textContent = target.difficulty === 'Simple' ? 'Bu heceyi oku' : 'Dikkatli oku!';
-    elements['session-current'].textContent = state.masteredHeceCount + 1;
-    elements['session-total'].textContent = state.totalHeceCount;
-
-    const ring = elements['progress-ring-fill'];
-    if (ring) {
-        const pct = state.totalHeceCount > 0 ? (state.masteredHeceCount / state.totalHeceCount) : 0;
-        ring.style.strokeDashoffset = 314 * (1 - pct);
-    }
-
+    lesson.idx = i;
+    lesson.attempts = 0;
+    lesson.uncertain = 0;
+    lesson.lastFeat = null;
+    const item = currentItem();
+    const card = $('rd-card');
+    card.className = 'rd-card';
+    card.dataset.kind = item.kind;
+    $('rd-kind').textContent = KIND_LABEL[item.kind];
+    $('rd-hint').textContent = KIND_HINT[item.kind];
+    $('rd-heard').textContent = '';
+    renderCardText(item);
     hideFeedback();
-    if (elements['btn-next']) elements['btn-next'].classList.remove('hidden');
-    if (elements['btn-parent-next']) elements['btn-parent-next'].classList.add('hidden');
-    elements['btn-listen'].classList.remove('listening');
-    elements['btn-listen'].querySelector('.listen-text').textContent = '🎤 Oku ve Dinlet';
-
-    const listenResult = elements['listen-result'] || document.getElementById('listen-result');
-    if (listenResult) {
-        listenResult.textContent = '';
-        listenResult.className = 'listen-result hidden';
-    }
-
-    if (state.isParentMode) {
-        elements['parent-check-group'].classList.remove('hidden');
-        elements['auto-check-group'].classList.add('hidden');
-        showSpeechBubble('Selim okuduğunda onayla!');
-    } else {
-        elements['parent-check-group'].classList.add('hidden');
-        elements['auto-check-group'].classList.remove('hidden');
-        showSpeechBubble('Hadi oku bakalım, ' + state.childName + '!');
-    }
+    setParentAttention(state.isParentMode, state.isParentMode ? `${state.childName} okuyunca onayla:` : '👨‍👧 Veli onayı:');
+    setMicState('idle');
+    $('game-score').textContent = state.score;
+    updateSteps();
+    if (item.kind === 'ses') setTimeout(() => { if (currentItem() === item && !lesson.busy) speakItem(); }, 350);
 }
 
-// Text-to-Speech (Sadece Tekrar Dinle butonuna basınca çalar, cevabı önceden söylemez!)
-function speakSyllable(text) {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'tr-TR';
-        utterance.rate = state.speechRate || 0.9;
-        utterance.pitch = 1.1;
-        window.speechSynthesis.speak(utterance);
-    }
+function speakItem() {
+    const item = currentItem();
+    if (!item) return Promise.resolve();
+    const fallback = item.kind === 'ses' ? (Judge.letterAliases(item.text)[1] || item.text) : item.text;
+    return Voice.play(item.key, { text: fallback });
 }
 
-function showSpeechBubble(text) {
-    const bubble = elements['speech-bubble'];
-    if (!bubble) return;
-    bubble.textContent = text;
-    bubble.classList.add('show');
-    setTimeout(() => bubble.classList.remove('show'), 3000);
+function setParentAttention(on, msg) {
+    $('parent-check-group').classList.toggle('attention', !!on);
+    if (msg) $('parent-msg').textContent = msg;
 }
 
-// Gerçek Web Speech API Ses Tanıma Motoru
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognitionInstance = null;
-let isListening = false;
-
-function startListening() {
-    const btn = elements['btn-listen'];
-    const listenResult = elements['listen-result'] || document.getElementById('listen-result');
-
-    if (!SpeechRecognition) {
-        showFeedback("Tarayıcınız ses tanımayı desteklemiyor (Chrome/Safari önerilir). Veli onay modu açıldı.", "warning");
-        elements['parent-check-group'].classList.remove('hidden');
-        return;
-    }
-
-    if (isListening && recognitionInstance) {
-        try { recognitionInstance.stop(); } catch (e) {}
-        isListening = false;
-        btn.classList.remove('listening');
-        btn.querySelector('.listen-text').textContent = '🎤 Oku ve Dinlet';
-        return;
-    }
-
-    try {
-        recognitionInstance = new SpeechRecognition();
-        recognitionInstance.lang = 'tr-TR';
-        recognitionInstance.continuous = false;
-        recognitionInstance.interimResults = true;
-        recognitionInstance.maxAlternatives = 5;
-
-        recognitionInstance.onstart = () => {
-            isListening = true;
-            btn.classList.add('listening');
-            btn.querySelector('.listen-text').textContent = 'Dinliyorum... Şimdi oku!';
-            if (listenResult) {
-                listenResult.textContent = '🎤 Mikrofona doğru oku...';
-                listenResult.className = 'listen-result';
-                listenResult.classList.remove('hidden');
-            }
-            showSpeechBubble('Seni dinliyorum, ' + state.childName + '!');
-        };
-
-        recognitionInstance.onresult = (event) => {
-            let interimTranscript = '';
-            let finalTranscript = '';
-            const allAlternatives = [];
-
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                const res = event.results[i];
-                if (res.isFinal) {
-                    finalTranscript += res[0].transcript;
-                    for (let a = 0; a < res.length; a++) {
-                        allAlternatives.push(res[a].transcript);
-                    }
-                } else {
-                    interimTranscript += res[0].transcript;
-                }
-            }
-
-            const currentSpoken = (finalTranscript || interimTranscript).trim();
-            if (listenResult && currentSpoken) {
-                listenResult.textContent = `Duyulan: "${currentSpoken}"`;
-            }
-
-            if (finalTranscript) {
-                evaluateSpeechInput(finalTranscript, allAlternatives);
-            }
-        };
-
-        recognitionInstance.onerror = (event) => {
-            console.warn('SpeechRecognition error:', event.error);
-            isListening = false;
-            btn.classList.remove('listening');
-            btn.querySelector('.listen-text').textContent = '🎤 Tekrar Oku';
-
-            if (event.error === 'no-speech') {
-                showFeedback('Ses duyulamadı. Mikrofona biraz daha yaklaş!', 'warning');
-                showSpeechBubble('Sesin gelmedi, mikrofona biraz yaklaşır mısın?');
-            } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                showFeedback('Mikrofon izni kapalı. Adres çubuğundaki kilit simgesinden mikrofona izin verin veya Veli Onayı ile onaylayın.', 'error');
-                showSpeechBubble('Mikrofona izin vermeyi unutma!');
-                elements['parent-check-group'].classList.remove('hidden');
-            } else {
-                showFeedback('Ses tanıma uyarısı: ' + event.error, 'warning');
-            }
-            // Herhangi bir aksamada veli hemen onaylayabilsin
-            elements['parent-check-group'].classList.remove('hidden');
-        };
-
-        recognitionInstance.onend = () => {
-            isListening = false;
-            btn.classList.remove('listening');
-            btn.querySelector('.listen-text').textContent = '🎤 Oku ve Dinlet';
-        };
-
-        recognitionInstance.start();
-    } catch (err) {
-        console.error('Speech recognition start error:', err);
-        showFeedback('Mikrofon başlatılamadı: ' + err.message, 'error');
-        elements['parent-check-group'].classList.remove('hidden');
-    }
+function setMicState(s, label) {
+    const btn = $('btn-listen');
+    btn.classList.toggle('listening', s === 'listening');
+    btn.classList.toggle('busy', s === 'busy');
+    btn.style.setProperty('--lvl', 0);
+    $('rd-card').classList.toggle('listening', s === 'listening');
+    const text = { idle: 'Oku', listening: 'Dinliyorum…', busy: label || 'Bakıyorum…' }[s];
+    btn.querySelector('.listen-text').textContent = text;
+    btn.querySelector('.mic-icon').textContent = s === 'listening' ? '🎙' : s === 'busy' ? '⏳' : '🎤';
+    btn.disabled = s === 'busy';
+    btn.style.display = state.isParentMode ? 'none' : '';
 }
 
-// Tanıma günlüğü: gerçekte ne duyulduğunu saklar, hakemi Selim'in sesine göre ayarlamak için
-function logAttempt(target, heard, result) {
+function say(text) {
+    const b = $('speech-bubble');
+    b.textContent = text;
+    b.classList.add('show');
+    clearTimeout(say.t);
+    say.t = setTimeout(() => b.classList.remove('show'), 3200);
+}
+
+function showFeedback(text, type = 'info') {
+    const fb = $('feedback-message');
+    fb.textContent = text;
+    fb.className = `feedback-message feedback-${type}`;
+}
+function hideFeedback() { $('feedback-message').className = 'feedback-message hidden'; }
+
+function bumpStat(item, ok) {
+    const s = state.stats[item.key] || { ok: 0, tries: 0 };
+    s.tries++;
+    if (ok) s.ok++;
+    state.stats[item.key] = s;
+}
+
+function logAttempt(item, r) {
     try {
         const log = JSON.parse(localStorage.getItem('selim_okur_asr_log') || '[]');
-        log.push({ t: Date.now(), target, heard, verdict: result.verdict, cost: result.best });
+        log.push({ t: Date.now(), key: item.key, heard: r.heard, verdict: r.verdict, why: r.why, ev: r.evidence, web: r.webAvailable, err: r.srError || null });
         localStorage.setItem('selim_okur_asr_log', JSON.stringify(log.slice(-500)));
     } catch (e) { /* günlük zorunlu değil */ }
 }
@@ -437,418 +293,503 @@ function exportAsrLog() {
     URL.revokeObjectURL(a.href);
 }
 
-function evaluateSpeechInput(spokenText, alternatives) {
-    if (!state.currentSyllable) return;
-    const target = state.currentSyllable.sequence;
-    const listenResult = elements['listen-result'] || document.getElementById('listen-result');
-    const heard = (alternatives && alternatives.length > 0) ? alternatives : [spokenText];
-    const pool = state.syllables.map(s => s.sequence);
-    const result = Judge.judge(target, heard, pool);
-    logAttempt(target, heard, result);
-
-    const setResult = (text, cls) => {
-        if (!listenResult) return;
-        listenResult.textContent = text;
-        listenResult.className = 'listen-result ' + cls;
-        listenResult.classList.remove('hidden');
-    };
-
-    if (result.verdict === 'correct') {
-        setResult(`Duyulan: "${result.heard}" ✓ Aferin!`, 'feedback-success');
-        showSpeechBubble(`Aferin ${state.childName}! Doğru okudun!`);
-        handleResult(true);
-    } else if (result.verdict === 'uncertain') {
-        // Emin değiliz: çocuğu yanlış cezalandırma, veli karar versin
-        setResult(`Duyulan: "${result.heard}" — emin olamadım`, 'feedback-warning');
-        showSpeechBubble('Tam anlayamadım. Bir daha okur musun?');
-        showFeedback(`Duyulan: "${result.heard}". Doğru muydu? Veli onaylayabilir.`, 'warning');
-        elements['parent-check-group'].classList.remove('hidden');
-    } else {
-        setResult(`Duyulan: "${result.heard || '...'}" (Hedef: "${formatLetterCase(target)}")`, 'feedback-warning');
-        showSpeechBubble('Bir daha deneyelim mi?');
-        showFeedback(`Duyulan: "${result.heard || '...'}" — Beklenen: "${formatLetterCase(target)}". Veli onayıyla da geçebilirsiniz.`, 'warning');
-        elements['parent-check-group'].classList.remove('hidden');
-        handleResult(false);
-    }
-}
-
-function handleParentVerdict(isCorrect) {
+async function onListenClick() {
+    Voice.unlock();
+    if (lesson.done) return;
+    if (lesson.busy) { if (lesson.ctl.stop) lesson.ctl.stop(); return; }
+    const item = currentItem();
+    if (!item) return;
+    Voice.stop();
     if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
-
-    if (isCorrect) {
-        handleResult(true);
-        if (elements['btn-parent-next']) {
-            elements['btn-parent-next'].classList.remove('hidden');
-        }
-        if (elements['btn-next']) {
-            elements['btn-next'].classList.remove('hidden');
-        }
-        // Bildi onayından 1.2 saniye sonra otomatik bir sonraki heceye geçer
-        autoAdvanceTimer = setTimeout(() => {
-            nextSyllable();
-        }, 1200);
-    } else {
-        handleResult(false);
-        if (elements['parent-check-group']) {
-            elements['parent-check-group'].classList.remove('hidden');
-        }
-    }
-}
-
-function handleResult(isSuccess) {
+    lesson.busy = true;
     hideFeedback();
-    if (isSuccess) {
-        if (state.currentSyllable) {
-            state.currentSyllable.isMastered = true;
-            state.currentSyllable.attemptCount++;
-        }
-        state.score += 10;
-        state.streak++;
-        state.masteredHeceCount++;
-        updateDisplays();
-        showFeedback('🎉 Harika! Doğru okudun, ' + state.childName + '!', 'success');
-        showSpeechBubble('Aferin ' + state.childName + '!');
-        playSound('correct');
-        elements['character'].textContent = '🎉';
-        setTimeout(() => elements['character'].textContent = state.character, 1200);
-        if (state.currentSyllable) addActivity('success', state.currentSyllable.sequence);
-        elements['btn-next'].classList.remove('hidden');
-    } else {
-        if (state.currentSyllable) {
-            state.currentSyllable.attemptCount++;
-        }
-        state.streak = 0;
-        updateDisplays();
-        playSound('wrong');
-        elements['character'].textContent = '😊';
-        setTimeout(() => elements['character'].textContent = state.character, 600);
-        if (state.currentSyllable) addActivity('attempt', state.currentSyllable.sequence);
-        elements['btn-next'].classList.remove('hidden');
-    }
-    saveState();
-    if (state.masteredHeceCount % 5 === 0 && state.masteredHeceCount > 0 && isSuccess) {
-        state.level = Math.min(5, state.level + 1);
-        showFeedback('🏆 Seviye ' + state.level + ' Oldun!', 'success');
-        playSound('levelup');
-    }
-}
-
-function showFeedback(text, type) {
-    const fb = elements['feedback-message'];
-    if (!fb) return;
-    fb.textContent = text;
-    fb.className = 'feedback-message';
-    if (type === 'success') fb.classList.add('feedback-success');
-    if (type === 'warning') fb.classList.add('feedback-warning');
-    if (type === 'error') fb.classList.add('feedback-error');
-    fb.classList.remove('hidden');
-}
-
-function hideFeedback() {
-    if (elements['feedback-message']) {
-        elements['feedback-message'].classList.add('hidden');
-    }
-}
-
-function updateDisplays() {
-    if (elements['game-score']) elements['game-score'].textContent = state.score;
-    if (elements['game-streak']) elements['game-streak'].textContent = state.streak;
-    if (elements['dash-total-score']) elements['dash-total-score'].textContent = state.score;
-    if (elements['dash-mastered-hece']) elements['dash-mastered-hece'].textContent = state.masteredHeceCount;
-    if (elements['dash-mastered-kelime']) elements['dash-mastered-kelime'].textContent = state.masteredKelimeCount;
-    if (elements['dash-current-level']) elements['dash-current-level'].textContent = state.level;
-}
-
-// Completion & Certificate
-function completeGame() {
-    showScreen('certificate');
-    elements['cert-name'].textContent = state.childName;
-    elements['cert-score'].textContent = state.score;
-    elements['cert-hece'].textContent = state.masteredHeceCount;
-    elements['cert-kelime'].textContent = state.masteredKelimeCount;
-    elements['cert-date'].textContent = new Date().toLocaleDateString('tr-TR');
-    const msgs = [
-        'Harika bir okuma başarısı!',
-        'Okuma yolculuğunda büyük adım!',
-        'Yıldız gibi parlayan okuyucu!'
-    ];
-    elements['cert-achievement-text'].textContent = msgs[Math.floor(Math.random() * msgs.length)];
-    playSound('levelup');
-    addActivity('certificate', 'Başarı belgesi kazanıldı!');
-}
-
-// Word Game Mode
-function startWordGame() {
-    const words = Curriculum.wordsFor(state.knownLetters, { minSyllables: 2 });
-    if (words.length === 0) {
-        showFeedback('Yeterli hece yok! Önce harf seçip hece çalışın.', 'error');
+    $('rd-card').classList.remove('ok', 'again');
+    $('rd-heard').textContent = '';
+    setMicState('busy', 'Mikrofon açılıyor…');
+    try {
+        await Mic.ensure();
+    } catch (e) {
+        lesson.busy = false;
+        setMicState('idle');
+        showFeedback(e.code === 'denied'
+            ? 'Mikrofon izni kapalı. Adres çubuğundaki kilit simgesinden mikrofona izin ver ya da veli onayını kullan.'
+            : `Mikrofon açılamadı: ${e.message}`, 'error');
+        setParentAttention(true, 'Mikrofon yok. Selim okuyunca sen onayla:');
         return;
     }
+    setMicState('listening');
+    $('btn-listen').disabled = false; // dinlerken "Bitir" olarak çalışır
+    say(`Seni dinliyorum, ${state.childName}!`);
+    let heard;
+    try {
+        heard = await Recognizer.listen({
+            engine: state.engine,
+            ctl: lesson.ctl,
+            onLevel: (v) => $('btn-listen').style.setProperty('--lvl', v.toFixed(2)),
+            onInterim: (t) => { $('rd-heard').textContent = `“${t}”`; },
+            maxMs: item.kind === 'cumle' ? 12000 : 6000
+        });
+    } catch (e) {
+        lesson.busy = false;
+        setMicState('idle');
+        showFeedback(`Dinleme hatası: ${e.message}`, 'error');
+        return;
+    }
+    setMicState('busy', 'Bakıyorum…');
+    let r;
+    try {
+        r = await Recognizer.evaluate(item, poolFor(item), heard);
+    } catch (e) {
+        console.error(e);
+        lesson.busy = false;
+        setMicState('idle');
+        showFeedback('Değerlendirme hatası. Veli onayını kullanabilirsin.', 'error');
+        setParentAttention(true, 'Selim okuyunca sen onayla:');
+        return;
+    }
+    lesson.busy = false;
+    lesson.lastFeat = r.feat || lesson.lastFeat;
+    logAttempt(item, r);
+    setMicState('idle');
+    applyVerdict(item, r);
+}
+
+function applyVerdict(item, r) {
+    const card = $('rd-card');
+    if (r.heard) $('rd-heard').textContent = `Duyulan: “${r.heard}”`;
+    if (r.srError === 'not-allowed' || r.srError === 'service-not-allowed') {
+        showFeedback('Tarayıcının konuşma tanıması kapalı; yalnızca ses eşleştirme kullanılıyor.', 'warning');
+    }
+    if (r.verdict === 'correct') { onSuccess(item, lesson.lastFeat); return; }
+    card.classList.add('again');
+    if (r.verdict === 'nospeech') {
+        say('Sesini duyamadım. Mikrofona biraz yaklaş!');
+        showFeedback('Ses duyulmadı. Mikrofona yaklaşıp tekrar dene.', 'warning');
+        return;
+    }
+    if (r.verdict === 'uncertain') {
+        lesson.uncertain++;
+        say('Tam anlayamadım. Bir daha okur musun?');
+        setParentAttention(true, 'Emin olamadım. Doğru muydu?');
+        return;
+    }
+    lesson.attempts++;
+    bumpStat(item, false);
+    playSound('wrong');
+    $('character').textContent = '😊';
+    setTimeout(() => { $('character').textContent = state.character; }, 700);
+    if (lesson.attempts >= 3) {
+        say('Birlikte okuyalım!');
+        setParentAttention(true, 'Takıldı. Birlikte okuyup onaylayabilirsin:');
+        speakItem();
+    } else {
+        say('Bir daha deneyelim mi?');
+        setParentAttention(lesson.attempts >= 2, 'Doğru okuduysa onayla:');
+        if (lesson.attempts === 1) speakItem();
+    }
+    saveState();
+}
+
+async function onSuccess(item, feat) {
+    const card = $('rd-card');
+    card.classList.remove('again');
+    card.classList.add('ok');
+    lesson.passed++;
+    if (lesson.attempts >= 3) lesson.helped++;
+    state.score += POINTS[item.kind];
+    $('game-score').textContent = state.score;
+    bumpStat(item, true);
+    saveState();
+    addActivity('success', `${item.text} ✓`);
+    playSound('correct');
+    $('character').textContent = '🎉';
+    setTimeout(() => { $('character').textContent = state.character; }, 1200);
+    say(['Aferin', 'Harika', 'Çok güzel'][Math.floor(Math.random() * 3)] + `, ${state.childName}!`);
+    setParentAttention(state.isParentMode, state.isParentMode ? `${state.childName} okuyunca onayla:` : '👨‍👧 Veli onayı:');
+    try { await Recognizer.enroll(item, feat); } catch (e) { /* şablon zorunlu değil */ }
+    refreshSettingsInfo();
+    if (state.isAutoMode) autoAdvanceTimer = setTimeout(nextItem, 1500);
+    else showFeedback('Doğru! Devam etmek için ➔ ye bas.', 'success');
+}
+
+function nextItem(skipped) {
+    if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
+    if (lesson.busy && lesson.ctl.stop) lesson.ctl.stop();
+    if (skipped === true) { lesson.skipped++; bumpStat(currentItem(), false); saveState(); }
+    if (lesson.idx + 1 >= lesson.items.length) { finishLesson(); return; }
+    showItem(lesson.idx + 1);
+}
+
+function finishLesson() {
+    lesson.done = true;
+    state.lessons++;
+    const total = lesson.items.length;
+    const ratio = lesson.passed / total;
+    const stars = ratio >= 0.9 ? 3 : ratio >= 0.6 ? 2 : 1;
+    saveState();
+    addActivity('lesson', `Ders bitti: ${lesson.passed}/${total} (${'⭐'.repeat(stars)})`);
+    playSound('levelup');
+    const idx = Curriculum.LETTER_ORDER.indexOf(state.knownLetters[state.knownLetters.length - 1]);
+    const next = Curriculum.LETTER_ORDER[idx + 1];
+    const s = $('rd-summary');
+    s.innerHTML = `
+        <div style="font-size:72px">🏆</div>
+        <h2>Ders bitti, ${state.childName}!</h2>
+        <div class="stars">${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)}</div>
+        <div class="sum-stats">
+            <div><b>${lesson.passed}/${total}</b>doğru</div>
+            <div><b>${lesson.helped + lesson.skipped}</b>pekiştirilecek</div>
+            <div><b>${state.score}</b>puan</div>
+        </div>
+        <div class="sum-actions">
+            ${next ? `<button class="btn-primary" id="sum-next">Yeni harf: ${caseText(next)} ➔</button>` : ''}
+            <button class="btn-secondary" id="sum-again">🔁 Dersi tekrarla</button>
+            <button class="btn-secondary" id="sum-cert">🎓 Belge</button>
+            <button class="btn-secondary" id="sum-home">Ana menü</button>
+        </div>`;
+    s.classList.remove('hidden');
+    $('sum-again').onclick = startLesson;
+    $('sum-home').onclick = () => showScreen('home');
+    $('sum-cert').onclick = openCertificate;
+    if (next) $('sum-next').onclick = () => { setKnownThrough(next); startLesson(); };
+}
+
+function prevItem() {
+    if (lesson.idx > 0) showItem(lesson.idx - 1);
+}
+
+async function parentVerdict(ok) {
+    Voice.unlock();
+    const item = currentItem();
+    if (!item || lesson.done) return;
+    if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
+    if (lesson.busy && lesson.ctl.stop) lesson.ctl.stop();
+    if (ok) {
+        if ($('rd-card').classList.contains('ok')) { nextItem(); return; }
+        addActivity('parent', `Veli onayladı: ${item.text}`);
+        onSuccess(item, lesson.lastFeat);
+    } else {
+        $('rd-card').classList.remove('ok');
+        $('rd-card').classList.add('again');
+        say('Tekrar deneyelim!');
+        await speakItem();
+    }
+}
+
+// ---------- Kelime Kur oyunu ----------
+const wordGame = { word: null, placed: [] };
+
+function startWordGame() {
+    Voice.unlock();
+    const words = Curriculum.wordsFor(state.knownLetters, { minSyllables: 2 });
+    if (words.length === 0) { alert('Bu harflerle kurulacak kelime yok. Önce birkaç harf daha öğrenin.'); return; }
     const word = words[Math.floor(Math.random() * words.length)];
-    state.currentWord = word;
-    state.placedSyllables = [];
-    elements['target-word-display'].textContent = formatLetterCase(word.sequence);
-    word.parts = word.syllables.map(sequence => ({ sequence }));
-    elements['target-word-hint'].textContent = 'Heceleri doğru sıraya diz';
-    elements['syllable-slots'].innerHTML = '';
-    for (let i = 0; i < word.parts.length; i++) {
+    wordGame.word = word;
+    wordGame.placed = [];
+    $('target-word-display').textContent = caseText(word.sequence);
+    $('target-word-hint').textContent = 'Heceleri doğru sıraya diz';
+    const slots = $('syllable-slots');
+    slots.innerHTML = '';
+    word.syllables.forEach((_, i) => {
         const slot = document.createElement('div');
         slot.className = 'syllable-slot';
         slot.dataset.index = i;
-        elements['syllable-slots'].appendChild(slot);
-    }
-    renderSyllableBank(word);
-    elements['word-feedback'].classList.add('hidden');
-    elements['btn-word-next'].classList.add('hidden');
+        slots.appendChild(slot);
+    });
+    const bank = $('syllable-bank');
+    bank.innerHTML = '';
+    word.syllables.slice().sort(() => Math.random() - 0.5).forEach((s) => {
+        const btn = document.createElement('button');
+        btn.className = 'syllable-bank-btn';
+        btn.textContent = caseText(s);
+        btn.addEventListener('click', () => {
+            if (wordGame.placed.length >= word.syllables.length) return;
+            Voice.play(`hece/${s}`, { text: s });
+            const slot = slots.children[wordGame.placed.length];
+            slot.textContent = caseText(s);
+            slot.classList.add('filled');
+            wordGame.placed.push(s);
+            btn.classList.add('used');
+            btn.disabled = true;
+            if (wordGame.placed.length === word.syllables.length) checkWord();
+        });
+        bank.appendChild(btn);
+    });
+    $('word-feedback').classList.add('hidden');
+    $('btn-word-next').classList.add('hidden');
     showScreen('word');
 }
 
-function renderSyllableBank(word) {
-    const bank = elements['syllable-bank'];
-    bank.innerHTML = '';
-    const parts = [...word.parts].sort(() => Math.random() - 0.5);
-    parts.forEach((part, idx) => {
-        const btn = document.createElement('button');
-        btn.className = 'syllable-bank-btn';
-        btn.textContent = formatLetterCase(part.sequence);
-        btn.dataset.partIdx = idx;
-        btn.addEventListener('click', () => addSyllableToSlot(part, btn));
-        bank.appendChild(btn);
-    });
-}
-
-function addSyllableToSlot(part, btn) {
-    if (state.placedSyllables.length >= state.currentWord.parts.length) return;
-    const idx = state.placedSyllables.length;
-    const slot = elements['syllable-slots'].children[idx];
-    slot.textContent = formatLetterCase(part.sequence);
-    slot.classList.add('filled');
-    state.placedSyllables.push(part);
-    btn.classList.add('used');
-    btn.disabled = true;
-    if (state.placedSyllables.length === state.currentWord.parts.length) {
-        checkWord();
-    }
-}
-
 function checkWord() {
-    const correct = state.placedSyllables.every((p, i) => p.sequence === state.currentWord.parts[i].sequence);
-    const fb = elements['word-feedback'];
-    if (correct) {
+    const w = wordGame.word;
+    const ok = wordGame.placed.every((p, i) => p === w.syllables[i]);
+    const fb = $('word-feedback');
+    if (ok) {
         state.score += 20;
-        state.masteredKelimeCount++;
-        updateDisplays();
-        fb.textContent = '🎉 Harika! Kelimeyi doğru oluşturdun!';
+        bumpStat({ key: `kelime/${w.sequence}` }, true);
+        fb.textContent = '🎉 Harika! Kelimeyi doğru kurdun!';
         fb.className = 'word-feedback feedback-success';
-        fb.classList.remove('hidden');
         playSound('correct');
-        addActivity('word_success', state.currentWord.sequence);
+        setTimeout(() => Voice.play(`kelime/${w.sequence}`, { text: w.sequence }), 500);
+        addActivity('word_success', w.sequence);
     } else {
         fb.textContent = '🤔 Hemen hemen! Tekrar deneyelim.';
         fb.className = 'word-feedback feedback-warning';
-        fb.classList.remove('hidden');
         playSound('wrong');
-        addActivity('word_attempt', state.currentWord.sequence);
     }
     saveState();
-    elements['btn-word-next'].classList.remove('hidden');
+    $('btn-word-next').classList.remove('hidden');
 }
 
 function clearWord() {
-    if (elements['syllable-slots']) {
-        Array.from(elements['syllable-slots'].children).forEach(s => {
-            s.textContent = '';
-            s.classList.remove('filled');
-        });
-    }
-    if (elements['syllable-bank']) {
-        Array.from(elements['syllable-bank'].children).forEach(b => {
-            b.classList.remove('used');
-            b.disabled = false;
-        });
-    }
-    state.placedSyllables = [];
-    if (elements['word-feedback']) elements['word-feedback'].classList.add('hidden');
-    if (elements['btn-word-next']) elements['btn-word-next'].classList.add('hidden');
+    Array.from($('syllable-slots').children).forEach((s) => { s.textContent = ''; s.classList.remove('filled'); });
+    Array.from($('syllable-bank').children).forEach((b) => { b.classList.remove('used'); b.disabled = false; });
+    wordGame.placed = [];
+    $('word-feedback').classList.add('hidden');
+    $('btn-word-next').classList.add('hidden');
 }
 
-// Dashboard
+// ---------- Veli paneli ----------
+function statCount(prefix) {
+    return Object.keys(state.stats).filter((k) => k.startsWith(prefix) && state.stats[k].ok > 0).length;
+}
+
 function renderDashboard() {
-    const grid = elements['letter-progress-grid'];
-    if (grid) {
-        grid.innerHTML = '';
-        Curriculum.LETTER_ORDER.forEach(letter => {
-            const item = document.createElement('div');
-            const isKnown = state.knownLetters.includes(letter);
-            item.className = 'letter-progress-item' + (isKnown ? ' mastered' : '');
-            const charText = `${letter} (${letter.toLocaleUpperCase('tr-TR')})`;
-            item.innerHTML = `<span class="letter-char">${charText}</span><span class="letter-status">${isKnown ? 'Bildi' : 'Öğrenilecek'}</span>`;
-            grid.appendChild(item);
-        });
-    }
+    $('dash-total-score').textContent = state.score;
+    $('dash-mastered-hece').textContent = statCount('hece/');
+    $('dash-mastered-kelime').textContent = statCount('kelime/');
+    $('dash-current-level').textContent = state.lessons + 1;
 
-    const activityList = elements['activity-list'];
-    if (activityList) {
-        activityList.innerHTML = '';
-        const recent = state.activities.slice(0, 10);
-        if (recent.length === 0) {
-            activityList.innerHTML = '<div class="activity-item empty">Henüz aktivite yok.</div>';
-        } else {
-            recent.forEach(a => {
-                const div = document.createElement('div');
-                div.className = 'activity-item';
-                div.innerHTML = `<span>${a.text}</span><span style="font-size:11px;color:var(--text-light);">${a.time}</span>`;
-                activityList.appendChild(div);
-            });
-        }
-    }
+    const grid = $('letter-progress-grid');
+    grid.innerHTML = '';
+    Curriculum.LETTER_ORDER.forEach((letter) => {
+        const known = state.knownLetters.includes(letter);
+        const item = document.createElement('div');
+        item.className = 'letter-progress-item' + (known ? ' mastered' : '');
+        item.innerHTML = `<span class="letter-char">${letter} (${letter.toLocaleUpperCase(TR)})</span><span class="letter-status">${known ? 'Bildi' : 'Öğrenilecek'}</span>`;
+        grid.appendChild(item);
+    });
+
+    const weak = $('weak-list');
+    weak.innerHTML = '';
+    const rows = Object.keys(state.stats).map((k) => ({ k, ...state.stats[k] }))
+        .filter((r) => r.tries - r.ok >= 2 && r.ok / r.tries < 0.6)
+        .sort((a, b) => (b.tries - b.ok) - (a.tries - a.ok)).slice(0, 8);
+    if (rows.length === 0) weak.innerHTML = '<div class="activity-item empty">Şimdilik takıldığı bir şey yok.</div>';
+    rows.forEach((r) => {
+        const d = document.createElement('div');
+        d.className = 'activity-item';
+        d.innerHTML = `<span><b>${r.k.split('/')[1]}</b> (${r.k.split('/')[0]})</span><span style="font-size:12px">${r.ok}/${r.tries} doğru</span>`;
+        weak.appendChild(d);
+    });
+
+    const list = $('activity-list');
+    list.innerHTML = '';
+    const recent = state.activities.slice(0, 10);
+    if (recent.length === 0) list.innerHTML = '<div class="activity-item empty">Henüz aktivite yok.</div>';
+    recent.forEach((a) => {
+        const d = document.createElement('div');
+        d.className = 'activity-item';
+        d.innerHTML = `<span>${a.text}</span><span style="font-size:11px;color:var(--text-light);">${a.time}</span>`;
+        list.appendChild(d);
+    });
 }
 
-// Settings
+function openCertificate() {
+    showScreen('certificate');
+    $('cert-name').textContent = state.childName;
+    $('cert-score').textContent = state.score;
+    $('cert-hece').textContent = statCount('hece/');
+    $('cert-kelime').textContent = statCount('kelime/');
+    $('cert-date').textContent = new Date().toLocaleDateString(TR);
+    $('cert-achievement-text').textContent = 'Okuma yolculuğunda büyük adımlar atıyor!';
+}
+
+// ---------- Ayarlar ----------
+function applyParentModeText() {
+    $('toggle-text').textContent = state.isParentMode ? '👨‍👧 Veli Onayı Modu' : '🤖 Otomatik Dinleme Modu';
+    $('mode-hint').textContent = state.isParentMode
+        ? 'Çocuk okuduğunda sen "Doğru okudu" butonuna basacaksın.'
+        : 'Uygulama mikrofonla çocuğun sesini dinler; emin olamazsa sana sorar.';
+}
+
+function refreshSettingsInfo() {
+    const n = Templates.total();
+    $('template-count').textContent = n === 0
+        ? 'Henüz öğrenilmiş kayıt yok. Selim doğru okudukça (ya da sen onayladıkça) uygulama onun sesini öğrenir ve daha iyi tanır.'
+        : `${Templates.labels().length} farklı hece/ses için toplam ${n} kayıt öğrenildi.`;
+    $('engine-note').textContent = Recognizer.webSpeechAvailable()
+        ? 'Bu cihazda tarayıcı konuşma tanıma var; ses eşleştirmeyle birlikte kullanılır.'
+        : 'Bu cihazda tarayıcı konuşma tanıma güvenilir değil (iPad/Safari); yalnızca ses eşleştirme kullanılır. Doğruluk için doğru okumaları onayla.';
+}
+
 function saveSettings() {
-    state.childName = document.getElementById('setting-child-name').value || 'Selim';
-    state.character = document.getElementById('setting-character').value;
-    state.speechRate = parseFloat(document.getElementById('setting-speech-rate').value);
-    state.sfxEnabled = document.getElementById('setting-sfx').checked;
-    state.isAutoMode = document.getElementById('setting-auto-mode').checked;
-    state.isParentMode = document.getElementById('parent-mode-toggle').checked;
+    state.childName = $('setting-child-name').value || 'Selim';
+    state.character = $('setting-character').value;
+    state.sfxEnabled = $('setting-sfx').checked;
+    state.isAutoMode = $('setting-auto-mode').checked;
+    state.isParentMode = $('parent-mode-toggle').checked;
+    state.engine = $('setting-engine').value;
+    $('character').textContent = state.character;
     saveState();
-    showFeedback('Ayarlar kaydedildi!', 'success');
+    alert('Ayarlar kaydedildi!');
 }
 
-function resetProgress() {
-    if (!confirm('Tüm ilerleme sıfırlanacak. Emin misiniz?')) return;
-    state.knownLetters = Curriculum.lettersThrough('t');
-    state.level = 1;
-    state.score = 0;
-    state.streak = 0;
-    state.masteredHeceCount = 0;
-    state.masteredKelimeCount = 0;
-    state.activities = [];
-    state.syllables = [];
-    saveState();
-    renderLetterGrid();
-    updateStartButton();
-    renderDashboard();
-    showFeedback('İlerleme sıfırlandı.', 'info');
+async function runMicTest() {
+    const out = $('mic-test-out'), meter = $('mic-meter'), btn = $('btn-mic-test');
+    btn.disabled = true;
+    out.textContent = 'Mikrofon açılıyor…';
+    try {
+        await Mic.ensure();
+        out.textContent = '🎙 Şimdi bir hece söyle (örn. "ka")…';
+        const t0 = performance.now();
+        const heard = await Recognizer.listen({
+            engine: state.engine,
+            onLevel: (v) => { meter.style.width = `${Math.round(v * 100)}%`; },
+            onInterim: (t) => { out.textContent = `🎙 Duyuluyor: “${t}”`; }
+        });
+        const feat = heard.audio.speech ? DSP.features(heard.audio.samples, heard.audio.rate) : [];
+        out.textContent = [
+            `Ses algılandı: ${heard.audio.speech ? 'evet' : 'HAYIR (mikrofon seviyesini kontrol et)'}`,
+            `Süre: ${(heard.audio.ms / 1000).toFixed(1)} sn, örnekleme: ${heard.audio.rate} Hz, öznitelik: ${feat.length} kare`,
+            `Tarayıcı tanıma: ${heard.webAvailable ? 'açık' : 'bu cihazda kapalı/yok'}${heard.srError ? ` (hata: ${heard.srError})` : ''}`,
+            heard.webAvailable ? `Duyulan: ${heard.web.alts.length ? heard.web.alts.slice(0, 4).map((a) => `“${a}”`).join(', ') : '(hiçbir şey)'}` : '',
+            `Süre: ${Math.round(performance.now() - t0)} ms`
+        ].filter(Boolean).join('\n');
+    } catch (e) {
+        out.textContent = e.code === 'denied' ? 'Mikrofon izni verilmedi. Adres çubuğundaki kilit simgesinden izin ver.' : `Hata: ${e.message}`;
+    }
+    meter.style.width = '0';
+    btn.disabled = false;
 }
 
-// Event Listeners
+// ---------- Seslerim (kayıt stüdyosu) ----------
+let studioTab = 'ses';
+let studioRec = null;
+
+function studioItems(tab) {
+    const known = state.knownLetters;
+    if (tab === 'ses') return known.map((l) => ({ key: `ses/${l}`, text: l, say: Judge.letterAliases(l)[1] || l }));
+    if (tab === 'hece') return Curriculum.generateSyllables(known).filter((s) => s.difficulty === 'Simple').map((s) => ({ key: `hece/${s.sequence}`, text: s.sequence, say: s.sequence }));
+    if (tab === 'kelime') return Curriculum.wordsFor(known).map((w) => ({ key: `kelime/${w.sequence}`, text: w.sequence, say: w.sequence }));
+    return Curriculum.sentencesFor(known).map((s) => ({ key: `cumle/${Curriculum.slug(s.text)}`, text: s.text, say: s.text }));
+}
+
+function renderStudio() {
+    const tabs = $('studio-tabs');
+    tabs.innerHTML = '';
+    [['ses', 'Harfler'], ['hece', 'Heceler'], ['kelime', 'Kelimeler'], ['cumle', 'Cümleler']].forEach(([k, label]) => {
+        const b = document.createElement('button');
+        b.className = 'studio-tab' + (k === studioTab ? ' active' : '');
+        b.textContent = label;
+        b.onclick = () => { studioTab = k; renderStudio(); };
+        tabs.appendChild(b);
+    });
+    const list = $('studio-list');
+    list.innerHTML = '';
+    studioItems(studioTab).forEach((it) => {
+        const row = document.createElement('div');
+        row.className = 'studio-row';
+        const src = Voice.source(it.key);
+        row.innerHTML = `<span class="txt">${it.text}</span><span class="src ${src === 'kayıt' ? 'rec' : ''}">${src === 'kayıt' ? 'Benim sesim' : src === 'dosya' ? 'Hazır ses' : 'Tarayıcı sesi'}</span>
+            <button data-a="play" title="Dinle">▶</button><button data-a="rec" title="Kaydet">⏺</button>${src === 'kayıt' ? '<button data-a="del" title="Kaydı sil">✕</button>' : ''}`;
+        row.querySelector('[data-a="play"]').onclick = () => { Voice.unlock(); Voice.play(it.key, { text: it.say }); };
+        row.querySelector('[data-a="rec"]').onclick = (e) => toggleStudioRecord(it, e.currentTarget);
+        const del = row.querySelector('[data-a="del"]');
+        if (del) del.onclick = async () => { await Voice.deleteRecording(it.key); renderStudio(); };
+        list.appendChild(row);
+    });
+}
+
+async function toggleStudioRecord(it, btn) {
+    Voice.unlock();
+    if (studioRec) { studioRec.stop(); return; }
+    try { await Mic.ensure(); } catch (e) { alert(e.code === 'denied' ? 'Mikrofon izni verilmedi.' : e.message); return; }
+    Voice.stop();
+    btn.classList.add('rec-on');
+    const rec = Mic.recordBlob({ maxMs: it.text.length > 8 ? 6000 : 3000 });
+    studioRec = rec;
+    const blob = await rec.done;
+    studioRec = null;
+    btn.classList.remove('rec-on');
+    if (blob.size > 800) await Voice.saveRecording(it.key, blob);
+    renderStudio();
+}
+
+// ---------- Olaylar ----------
 function setupEventListeners() {
-    const on = (id, event, handler) => {
-        const el = elements[id];
-        if (el) el.addEventListener(event, handler);
-    };
+    const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+    document.addEventListener('pointerdown', () => Voice.unlock(), { once: true });
 
-    on('letter-grid', 'click', (e) => {
-        const btn = e.target.closest('.letter-btn');
-        if (btn && btn.dataset.letter) setKnownThrough(btn.dataset.letter);
-    });
+    on('letter-grid', 'click', (e) => { const b = e.target.closest('.letter-btn'); if (b) setKnownThrough(b.dataset.letter); });
+    on('btn-case-lower', 'click', () => { state.isLowerCase = true; updateCaseButtons(); renderLetterGrid(); saveState(); });
+    on('btn-case-upper', 'click', () => { state.isLowerCase = false; updateCaseButtons(); renderLetterGrid(); saveState(); });
+    on('parent-mode-toggle', 'change', (e) => { state.isParentMode = e.target.checked; applyParentModeText(); saveState(); });
 
-    on('btn-case-lower', 'click', () => {
-        state.isLowerCase = true;
-        updateCaseButtons();
-        renderLetterGrid();
-        if (state.currentSyllable && elements['syllable-display']) {
-            elements['syllable-display'].textContent = formatLetterCase(state.currentSyllable.sequence);
-        }
-        saveState();
-    });
-
-    on('btn-case-upper', 'click', () => {
-        state.isLowerCase = false;
-        updateCaseButtons();
-        renderLetterGrid();
-        if (state.currentSyllable && elements['syllable-display']) {
-            elements['syllable-display'].textContent = formatLetterCase(state.currentSyllable.sequence);
-        }
-        saveState();
-    });
-
-    on('parent-mode-toggle', 'change', (e) => {
-        state.isParentMode = e.target.checked;
-        if (elements['toggle-text']) {
-            elements['toggle-text'].textContent = state.isParentMode ? '👨‍👧 Veli Onayı Modu' : '🤖 Otomatik Dinleme Modu';
-        }
-        if (elements['mode-hint']) {
-            elements['mode-hint'].textContent = state.isParentMode
-                ? 'Çocuk okuduğunda sen "Evet, Bildi" butonuna basacaksın.'
-                : 'Uygulama mikrofonla çocuğun sesini tanır.';
-        }
-        saveState();
-    });
-
-    on('btn-start', 'click', startGame);
+    on('btn-start', 'click', startLesson);
+    on('btn-word-game', 'click', startWordGame);
+    on('btn-studio', 'click', () => { renderStudio(); showScreen('studio'); });
+    on('btn-studio-back', 'click', () => showScreen('home'));
     on('btn-dashboard-back', 'click', () => showScreen('home'));
-    on('btn-game-back', 'click', () => showScreen('home'));
+    on('btn-game-back', 'click', () => { if (lesson.busy && lesson.ctl.stop) lesson.ctl.stop(); showScreen('home'); });
     on('btn-word-back', 'click', () => showScreen('home'));
     on('btn-settings-back', 'click', () => showScreen('home'));
     on('btn-settings-save', 'click', saveSettings);
-    on('btn-reset-progress', 'click', resetProgress);
-    on('btn-export-log', 'click', exportAsrLog);
-
-    on('btn-repeat', 'click', () => {
-        if (state.currentSyllable) speakSyllable(state.currentSyllable.sequence);
-    });
-
-    on('btn-next', 'click', () => nextSyllable());
-    on('btn-prev-syllable', 'click', () => prevSyllable());
-    on('btn-next-syllable', 'click', () => nextSyllable());
-    on('btn-parent-next', 'click', () => nextSyllable());
-    on('btn-listen', 'click', startListening);
-    on('btn-parent-yes', 'click', () => handleParentVerdict(true));
-    on('btn-parent-no', 'click', () => handleParentVerdict(false));
-
-    on('btn-word-clear', 'click', clearWord);
-    on('btn-word-check', 'click', checkWord);
-    on('btn-word-next', 'click', startWordGame);
-
-    on('btn-cert-print', 'click', () => window.print());
-    on('btn-cert-home', 'click', () => showScreen('home'));
     on('btn-parent-dashboard', 'click', () => showScreen('dashboard'));
     on('btn-settings', 'click', () => showScreen('settings'));
+    on('btn-export-log', 'click', exportAsrLog);
+    on('btn-mic-test', 'click', runMicTest);
+    on('btn-clear-templates', 'click', async () => {
+        if (confirm('Selim\'in sesinden öğrenilenler silinsin mi?')) { await Templates.clear(); refreshSettingsInfo(); }
+    });
+    on('btn-reset-progress', 'click', () => {
+        if (!confirm('Tüm ilerleme sıfırlanacak. Emin misiniz?')) return;
+        state.knownLetters = Curriculum.lettersThrough('t');
+        state.score = 0; state.lessons = 0; state.stats = {}; state.activities = [];
+        saveState(); renderLetterGrid(); updateStartButton(); renderDashboard();
+    });
+
+    on('btn-listen', 'click', onListenClick);
+    on('btn-repeat', 'click', () => { Voice.unlock(); speakItem(); });
+    on('btn-next', 'click', () => nextItem(!$('rd-card').classList.contains('ok')));
+    on('btn-parent-yes', 'click', () => parentVerdict(true));
+    on('btn-parent-no', 'click', () => parentVerdict(false));
+
+    on('btn-word-clear', 'click', clearWord);
+    on('btn-word-check', 'click', () => { if (wordGame.placed.length === wordGame.word.syllables.length) checkWord(); });
+    on('btn-word-next', 'click', startWordGame);
+    on('btn-cert-print', 'click', () => window.print());
+    on('btn-cert-home', 'click', () => showScreen('home'));
+
+    document.addEventListener('keydown', (e) => {
+        if (!screens.game.classList.contains('active') || e.target.matches('input, select, textarea')) return;
+        if (e.code === 'Space') { e.preventDefault(); onListenClick(); }
+        else if (e.key === 'ArrowRight') nextItem(!$('rd-card').classList.contains('ok'));
+        else if (e.key === 'ArrowLeft') prevItem();
+        else if (e.key.toLowerCase() === 'd') speakItem();
+    });
 }
 
-// Sound effects using AudioContext
+// ---------- Efekt sesleri ----------
+let sfxCtx = null;
 function playSound(type) {
     if (!state.sfxEnabled) return;
     try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        if (type === 'correct') {
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
-            osc.frequency.exponentialRampToValueAtTime(783.99, audioCtx.currentTime + 0.15); // G5
-            gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.25);
-        } else if (type === 'wrong') {
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(220, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(140, audioCtx.currentTime + 0.25);
-            gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.3);
-        } else if (type === 'levelup') {
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(440, audioCtx.currentTime);
-            osc.frequency.linearRampToValueAtTime(880, audioCtx.currentTime + 0.15);
-            osc.frequency.linearRampToValueAtTime(1320, audioCtx.currentTime + 0.3);
-            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.5);
-        }
-    } catch (e) {
-        console.log('AudioContext error:', e);
-    }
+        sfxCtx = sfxCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const t = sfxCtx.currentTime, osc = sfxCtx.createOscillator(), gain = sfxCtx.createGain();
+        osc.connect(gain); gain.connect(sfxCtx.destination);
+        const tune = {
+            correct: ['sine', [[523.25, 0], [783.99, 0.15]], 0.25, 0.12],
+            wrong: ['triangle', [[300, 0], [200, 0.25]], 0.3, 0.08],
+            levelup: ['sine', [[440, 0], [880, 0.15], [1320, 0.3]], 0.5, 0.15]
+        }[type];
+        if (!tune) return;
+        osc.type = tune[0];
+        tune[1].forEach(([f, d], i) => (i === 0 ? osc.frequency.setValueAtTime(f, t + d) : osc.frequency.linearRampToValueAtTime(f, t + d)));
+        gain.gain.setValueAtTime(tune[3], t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + tune[2]);
+        osc.start(t); osc.stop(t + tune[2]);
+    } catch (e) { /* ses efekti zorunlu değil */ }
 }
 
-// Start
 init();
