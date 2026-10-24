@@ -276,6 +276,16 @@ function bumpStat(item, ok) {
     state.stats[item.key] = s;
 }
 
+// Gömülü çerçevede (önizleme) tarayıcı mikrofonu hiç sormaz; kilit simgesi işe yaramaz.
+function micErrorText(e) {
+    let embedded = false;
+    try { embedded = window.top !== window.self; } catch (err) { embedded = true; }
+    if (embedded) return 'Bu önizleme çerçevesinde mikrofon kapalı. Uygulamayı kendi bilgisayarında tarayıcıda aç (node server.js, localhost:3000). Şimdilik veli onayını kullanabilirsin.';
+    if (e.code === 'denied') return 'Mikrofon izni kapalı. Adres çubuğundaki kilit simgesinden mikrofona izin ver, sonra sayfayı yenile. Ya da veli onayını kullan.';
+    if (e.code === 'unsupported') return 'Mikrofon için sayfa HTTPS ya da localhost üzerinden açılmalı.';
+    return `Mikrofon açılamadı: ${e.message}`;
+}
+
 function logAttempt(item, r) {
     try {
         const log = JSON.parse(localStorage.getItem('selim_okur_asr_log') || '[]');
@@ -311,9 +321,7 @@ async function onListenClick() {
     } catch (e) {
         lesson.busy = false;
         setMicState('idle');
-        showFeedback(e.code === 'denied'
-            ? 'Mikrofon izni kapalı. Adres çubuğundaki kilit simgesinden mikrofona izin ver ya da veli onayını kullan.'
-            : `Mikrofon açılamadı: ${e.message}`, 'error');
+        showFeedback(micErrorText(e), 'error');
         setParentAttention(true, 'Mikrofon yok. Selim okuyunca sen onayla:');
         return;
     }
@@ -657,7 +665,7 @@ async function runMicTest() {
             `Süre: ${Math.round(performance.now() - t0)} ms`
         ].filter(Boolean).join('\n');
     } catch (e) {
-        out.textContent = e.code === 'denied' ? 'Mikrofon izni verilmedi. Adres çubuğundaki kilit simgesinden izin ver.' : `Hata: ${e.message}`;
+        out.textContent = micErrorText(e);
     }
     meter.style.width = '0';
     btn.disabled = false;
