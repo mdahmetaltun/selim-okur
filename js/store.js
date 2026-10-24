@@ -69,6 +69,7 @@ const Store = (() => {
         allVoiceKeys: () => all('voice').then((rows) => rows.map((r) => r.key)),
         getTemplates: (label) => get('templates', label),
         putTemplates: (label, feats) => put('templates', { label, feats }, 'label'),
+        delTemplates: (label) => del('templates', label),
         allTemplates: () => all('templates'),
         clearTemplates: () => all('templates').then((rows) => Promise.all(rows.map((r) => del('templates', r.label))))
     };

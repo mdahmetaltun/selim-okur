@@ -117,6 +117,8 @@
                 <span class="btn-text">Dersi Başlat</span>
             </button>
 
+            <button id="btn-teach" class="btn-outline btn-teach" title="Selim birkaç hece okur; uygulama onun sesini öğrenir">🎙 Sesimi Tanıt <small>(tanıma iyileşir)</small></button>
+
             <div class="quick-actions">
                 <button id="btn-word-game" class="btn-outline"><span>🧩 Kelime Kur</span></button>
                 <button id="btn-studio" class="btn-outline"><span>🎙 Seslerim</span></button>
@@ -163,6 +165,11 @@
             <div class="progress-section">
                 <h3 class="section-title">Harf İlerlemesi</h3>
                 <div class="letter-progress-grid" id="letter-progress-grid"></div>
+            </div>
+
+            <div class="progress-section">
+                <h3 class="section-title">Tanıma Gelişimi</h3>
+                <div class="activity-list" id="recog-stats"></div>
             </div>
 
             <div class="progress-section">
@@ -429,6 +436,8 @@
     <script src="js/dsp.js"></script>
     <script src="js/verify.js"></script>
     <script src="js/store.js"></script>
+    <script src="js/templates.js"></script>
+    <script src="js/learn.js"></script>
     <script src="js/mic.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/recognizer.js"></script>

@@ -6,7 +6,8 @@
  * personal : DSP.classify(Selim'in kendi şablonları) ya da null
  * ref      : DSP.classify(üretilmiş/veli referansı) ya da null
  * opts     : { target, personalCount (hedefin kendi şablon sayısı), personalLabels (kaç farklı etiket),
- *              intra (hedefin kendi şablonlarının iç mesafesi), speech (mikrofonda konuşma algılandı mı) }
+ *              rivals (havuzdaki diğer öğelerden kaçının şablonu var),
+ *              intra (hedefin kendi şablonlarının iç mesafesi), typical (tüm şablonlarda tipik iç mesafe), speech (mikrofonda konuşma algılandı mı) }
  */
 (function (root, factory) {
     if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -14,14 +15,27 @@
 })(typeof self !== 'undefined' ? self : this, function () {
     const MARGIN_SUPPORT = 0.08;
     const MARGIN_CONTRADICT = 0.15;
+    const MARGIN_SUPPORT_SINGLE = 0.2;
+    const MARGIN_CONTRADICT_SINGLE = 0.3;
     const MARGIN_REF = 0.25;
+    const DEFAULT_INTRA = 0.9;   // sentetik ölçümden: aynı kişinin tekrarları arasındaki tipik DTW mesafesi
+    const GATE_MULT = 2.0, GATE_ADD = 0.4;
 
     function evidence(personal, ref, o) {
         const out = { personal: 'none', ref: 'none' };
-        if (personal && o.personalCount >= 2 && o.personalLabels >= 3) {
-            const close = !o.intra || personal.bestDist <= o.intra * 2.2 + 0.5;
-            if (personal.best === o.target && personal.margin >= MARGIN_SUPPORT && close) out.personal = 'support';
-            else if (personal.best !== o.target && personal.margin >= MARGIN_CONTRADICT) out.personal = 'contradict';
+        if (personal && o.personalCount >= 1 && o.personalLabels >= 3) {
+            // Tek örnekle daha temkinli: daha büyük fark ister. İki ve üstü örnekte normal eşik.
+            const single = o.personalCount < 2;
+            const supportMin = single ? MARGIN_SUPPORT_SINGLE : MARGIN_SUPPORT;
+            const contradictMin = single ? MARGIN_CONTRADICT_SINGLE : MARGIN_CONTRADICT;
+            // Yakınlık kapısı: Selim'in kendi tekrarlarının tipik değişkenliğinden öğrenilir (yoksa varsayılan).
+            let limit = GATE_MULT * (o.typical != null ? o.typical : DEFAULT_INTRA) + GATE_ADD;
+            if (o.intra) limit = Math.min(limit, 2.2 * o.intra + 0.5);
+            const close = personal.bestDist <= limit;
+            // Güvenlik: rakiplerin örneği yoksa hedefin şablonu "tek yakın" görünür; en az 2 rakip örneği iste.
+            const rivalsOk = o.rivals === undefined || o.rivals >= 2;
+            if (personal.best === o.target && personal.margin >= supportMin && close && rivalsOk) out.personal = 'support';
+            else if (personal.best !== o.target && personal.margin >= contradictMin) out.personal = 'contradict';
         }
         if (ref) {
             if (ref.best === o.target && ref.margin >= MARGIN_REF) out.ref = 'support';

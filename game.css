@@ -155,3 +155,8 @@ body { align-items: flex-start; }
 .letter-grid.focus-mode .letter-btn.focus-sel .letter-sub { color: rgba(255,255,255,.85); }
 .letter-grid.focus-mode .letter-btn.last-known { transform: none; }
 .letter-grid.focus-mode .letter-btn.focus-sel.last-known { transform: scale(1.06); }
+
+.btn-teach { width: 100%; margin: 12px 0 0; padding: 14px 18px; border-color: #74c0fc; background: #e7f5ff; color: #1864ab; font-family: var(--font-heading); font-size: 17px; font-weight: 700; }
+.btn-teach small { font-weight: 600; opacity: .75; }
+.btn-teach:hover { background: #d0ebff; border-color: #339af0; color: #1864ab; }
+#screen-home .btn-teach { grid-column: 1; }

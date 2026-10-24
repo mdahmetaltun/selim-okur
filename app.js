@@ -239,7 +239,7 @@ function updateStartButton() {
 }
 
 // ---------- Ders akışı ----------
-const lesson = { items: [], meta: { mode: 'path' }, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false };
+const lesson = { items: [], meta: { mode: 'path' }, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, lastResult: null, done: false };
 
 function buildSession() {
     const known = state.knownLetters;
@@ -249,16 +249,54 @@ function buildSession() {
     return { items: p.items, meta: { mode: 'path', from: p.from, to: p.to, total: p.total, letters: p.letters } };
 }
 
-function startLesson() {
-    Voice.unlock();
-    const { items, meta } = buildSession();
-    if (items.length === 0) { alert('Bu seçimle ders oluşturulamadı. Harf seçimini kontrol et.'); return; }
-    Object.assign(lesson, { items, meta, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, done: false });
+function beginSession(items, meta) {
+    Object.assign(lesson, { items, meta, idx: 0, attempts: 0, uncertain: 0, busy: false, ctl: {}, passed: 0, helped: 0, skipped: 0, lastFeat: null, lastResult: null, done: false, taught: 0, teachMiss: 0, lastTaught: null });
     $('rd-summary').classList.add('hidden');
     showScreen('game');
     $('character').textContent = state.character;
     renderSteps();
     showItem(0);
+}
+
+// ---------- Sesimi tanıt: Selim okur, uygulama dinleyip sesini şablon olarak öğrenir ----------
+async function startTeach() {
+    Voice.unlock();
+    const focus = state.mode === 'focus' ? state.focusLetters : [];
+    const items = Curriculum.buildCalibration(state.knownLetters, Templates.counts(), { n: 16, focus });
+    if (items.length === 0) { alert('Önce bilinen harfleri seç.'); return; }
+    try { await Mic.ensure(); } catch (e) { alert(micErrorText(e)); return; }
+    beginSession(items, { mode: 'teach' });
+    addActivity('teach', 'Ses tanıtma oturumu');
+}
+
+async function handleTeach(item, heard) {
+    if (!screens.game.classList.contains('active') || lesson.done) return;
+    const card = $('rd-card');
+    const retry = (ms) => { autoAdvanceTimer = setTimeout(() => { if (currentItem() === item && !lesson.busy) onListenClick(); }, ms); };
+    if (!heard.audio.speech) {
+        lesson.teachMiss++;
+        say('Sesini duyamadım. Bir daha oku!');
+        if (lesson.teachMiss < 3) retry(900);
+        else { lesson.teachMiss = 0; showFeedback('Ses gelmiyor. Mikrofonu kontrol et ya da Atla.', 'warning'); }
+        return;
+    }
+    lesson.teachMiss = 0;
+    const feat = DSP.features(heard.audio.samples, heard.audio.rate);
+    if (feat.length <= 10 || !(await Templates.add(item.key, feat))) { say('Çok kısa oldu. Bir daha oku!'); retry(900); return; }
+    lesson.lastTaught = { key: item.key, feat };
+    lesson.taught++;
+    card.classList.add('ok');
+    playSound('correct');
+    say(['Tamam, öğrendim!', 'Güzel, duydum!', 'Harika!'][lesson.taught % 3]);
+    refreshSettingsInfo();
+    autoAdvanceTimer = setTimeout(nextItem, 1300);
+}
+
+function startLesson() {
+    Voice.unlock();
+    const { items, meta } = buildSession();
+    if (items.length === 0) { alert('Bu seçimle ders oluşturulamadı. Harf seçimini kontrol et.'); return; }
+    beginSession(items, meta);
     const what = meta.mode === 'path' ? `baştan ilerle, ${meta.letters.map(caseText).join(' ')}` : meta.mode === 'mixed' ? 'karışık tekrar' : `seçilen harfler: ${state.focusLetters.map(caseText).join(' ')}`;
     addActivity('start', `Ders başladı (${what})`);
 }
@@ -314,20 +352,29 @@ function showItem(i) {
     lesson.attempts = 0;
     lesson.uncertain = 0;
     lesson.lastFeat = null;
+    lesson.lastResult = null;
     const item = currentItem();
     const card = $('rd-card');
     card.className = 'rd-card';
     card.dataset.kind = item.kind;
-    $('rd-kind').textContent = KIND_LABEL[item.kind];
-    $('rd-hint').textContent = KIND_HINT[item.kind];
+    const teach = lesson.meta.mode === 'teach';
+    $('rd-kind').textContent = teach ? 'Sesini tanıtalım: oku' : KIND_LABEL[item.kind];
+    $('rd-hint').textContent = teach ? 'Ben dinliyorum ve sesini öğreniyorum' : KIND_HINT[item.kind];
     $('rd-heard').textContent = '';
     renderCardText(item);
     hideFeedback();
-    setParentAttention(state.isParentMode, state.isParentMode ? `${state.childName} okuyunca onayla:` : '👨‍👧 Veli onayı:');
+    setParentAttention(teach || state.isParentMode, teach ? 'Yanlış okuduysa ↻ Tekrar\'a bas, kaydı silerim:' : state.isParentMode ? `${state.childName} okuyunca onayla:` : '👨‍👧 Veli onayı:');
     setMicState('idle');
     $('game-score').textContent = state.score;
     updateSteps();
-    if (item.kind === 'ses') setTimeout(() => { if (currentItem() === item && !lesson.busy) speakItem(); }, 350);
+    if (teach) {
+        // örnek sesi çal (harf sesleri için), bitince kendiliğinden dinlemeye başla
+        autoAdvanceTimer = setTimeout(async () => {
+            if (currentItem() !== item || lesson.done) return;
+            if (item.kind === 'ses') await speakItem();
+            if (currentItem() === item && !lesson.busy && !lesson.done && screens.game.classList.contains('active')) onListenClick();
+        }, item.kind === 'ses' ? 300 : 800);
+    } else if (item.kind === 'ses') setTimeout(() => { if (currentItem() === item && !lesson.busy) speakItem(); }, 350);
 }
 
 function speakItem() {
@@ -390,7 +437,7 @@ function micErrorText(e) {
 function logAttempt(item, r) {
     try {
         const log = JSON.parse(localStorage.getItem('selim_okur_asr_log') || '[]');
-        log.push({ t: Date.now(), key: item.key, heard: r.heard, verdict: r.verdict, why: r.why, ev: r.evidence, web: r.webAvailable, err: r.srError || null });
+        log.push({ t: Date.now(), key: item.key, heard: r.heard, verdict: r.verdict, why: r.why, ev: r.evidence, web: r.webAvailable, err: r.srError || null, n: Templates.count(item.key) });
         localStorage.setItem('selim_okur_asr_log', JSON.stringify(log.slice(-500)));
     } catch (e) { /* günlük zorunlu değil */ }
 }
@@ -432,7 +479,7 @@ async function onListenClick() {
     let heard;
     try {
         heard = await Recognizer.listen({
-            engine: state.engine,
+            engine: lesson.meta.mode === 'teach' ? 'voice' : state.engine,
             ctl: lesson.ctl,
             onLevel: (v) => $('btn-listen').style.setProperty('--lvl', v.toFixed(2)),
             onInterim: (t) => { $('rd-heard').textContent = `“${t}”`; },
@@ -442,6 +489,12 @@ async function onListenClick() {
         lesson.busy = false;
         setMicState('idle');
         showFeedback(`Dinleme hatası: ${e.message}`, 'error');
+        return;
+    }
+    if (lesson.meta.mode === 'teach') {
+        lesson.busy = false;
+        setMicState('idle');
+        await handleTeach(item, heard);
         return;
     }
     setMicState('busy', 'Bakıyorum…');
@@ -458,6 +511,7 @@ async function onListenClick() {
     }
     lesson.busy = false;
     lesson.lastFeat = r.feat || lesson.lastFeat;
+    lesson.lastResult = r;
     logAttempt(item, r);
     setMicState('idle');
     applyVerdict(item, r);
@@ -466,10 +520,12 @@ async function onListenClick() {
 function applyVerdict(item, r) {
     const card = $('rd-card');
     if (r.heard) $('rd-heard').textContent = `Duyulan: “${r.heard}”`;
+    if (r.why === 'learned-alias') $('rd-heard').textContent += '  · alışık olduğum bir söyleyiş 🧠';
+    else if ((r.why || '').startsWith('voice')) $('rd-heard').textContent += '  · sesini tanıdım 🧠';
     if (r.srError === 'not-allowed' || r.srError === 'service-not-allowed') {
         showFeedback('Tarayıcının konuşma tanıması kapalı; yalnızca ses eşleştirme kullanılıyor.', 'warning');
     }
-    if (r.verdict === 'correct') { onSuccess(item, lesson.lastFeat); return; }
+    if (r.verdict === 'correct') { onSuccess(item, r, 'auto'); return; }
     card.classList.add('again');
     if (r.verdict === 'nospeech') {
         say('Sesini duyamadım. Mikrofona biraz yaklaş!');
@@ -499,7 +555,7 @@ function applyVerdict(item, r) {
     saveState();
 }
 
-async function onSuccess(item, feat) {
+async function onSuccess(item, result, source) {
     const card = $('rd-card');
     card.classList.remove('again');
     card.classList.add('ok');
@@ -515,7 +571,7 @@ async function onSuccess(item, feat) {
     setTimeout(() => { $('character').textContent = state.character; }, 1200);
     say(['Aferin', 'Harika', 'Çok güzel'][Math.floor(Math.random() * 3)] + `, ${state.childName}!`);
     setParentAttention(state.isParentMode, state.isParentMode ? `${state.childName} okuyunca onayla:` : '👨‍👧 Veli onayı:');
-    try { await Recognizer.enroll(item, feat); } catch (e) { /* şablon zorunlu değil */ }
+    try { await Recognizer.confirmed(item, result, source); } catch (e) { /* öğrenme zorunlu değil */ }
     refreshSettingsInfo();
     if (state.isAutoMode) autoAdvanceTimer = setTimeout(nextItem, 1500);
     else showFeedback('Doğru! Devam etmek için ➔ ye bas.', 'success');
@@ -524,12 +580,37 @@ async function onSuccess(item, feat) {
 function nextItem(skipped) {
     if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
     if (lesson.busy && lesson.ctl.stop) lesson.ctl.stop();
-    if (skipped === true) { lesson.skipped++; bumpStat(currentItem(), false); saveState(); }
+    if (skipped === true && lesson.meta.mode !== 'teach') { lesson.skipped++; bumpStat(currentItem(), false); saveState(); }
     if (lesson.idx + 1 >= lesson.items.length) { finishLesson(); return; }
     showItem(lesson.idx + 1);
 }
 
+function finishTeach() {
+    lesson.done = true;
+    playSound('levelup');
+    saveState();
+    const n = Templates.labels().length;
+    const s = $('rd-summary');
+    s.innerHTML = `
+        <div style="font-size:72px">🧠</div>
+        <h2>Sesini daha iyi tanıyorum, ${state.childName}!</h2>
+        <div class="sum-stats">
+            <div><b>${lesson.taught}</b>yeni örnek</div>
+            <div><b>${n}</b>ses/hece tanıyorum</div>
+            <div><b>${Templates.total()}</b>toplam örnek</div>
+        </div>
+        <p class="studio-intro">Her tanıtma turunda ve doğru okumada tanıma biraz daha iyileşir.</p>
+        <div class="sum-actions">
+            <button class="btn-primary" id="sum-again">🎙 Bir tur daha</button>
+            <button class="btn-secondary" id="sum-home">Ana menü</button>
+        </div>`;
+    s.classList.remove('hidden');
+    $('sum-again').onclick = startTeach;
+    $('sum-home').onclick = () => { showScreen('home'); renderDashboard(); };
+}
+
 function finishLesson() {
+    if (lesson.meta.mode === 'teach') { finishTeach(); return; }
     lesson.done = true;
     state.lessons++;
     const m = lesson.meta;
@@ -581,11 +662,25 @@ async function parentVerdict(ok) {
     if (!item || lesson.done) return;
     if (autoAdvanceTimer) clearTimeout(autoAdvanceTimer);
     if (lesson.busy && lesson.ctl.stop) lesson.ctl.stop();
+    if (lesson.meta.mode === 'teach') {
+        if (ok) { nextItem(); return; }
+        if (lesson.lastTaught && lesson.lastTaught.key === item.key) {
+            await Templates.remove(item.key, lesson.lastTaught.feat);
+            lesson.lastTaught = null;
+            lesson.taught = Math.max(0, lesson.taught - 1);
+            refreshSettingsInfo();
+        }
+        $('rd-card').classList.remove('ok');
+        say('Tekrar oku!');
+        autoAdvanceTimer = setTimeout(() => { if (currentItem() === item && !lesson.busy) onListenClick(); }, 600);
+        return;
+    }
     if (ok) {
         if ($('rd-card').classList.contains('ok')) { nextItem(); return; }
         addActivity('parent', `Veli onayladı: ${item.text}`);
-        onSuccess(item, lesson.lastFeat);
+        onSuccess(item, lesson.lastResult || { feat: lesson.lastFeat }, 'parent');
     } else {
+        Recognizer.rejected(item, lesson.lastResult);
         $('rd-card').classList.remove('ok');
         $('rd-card').classList.add('again');
         say('Tekrar deneyelim!');
@@ -687,6 +782,8 @@ function renderDashboard() {
         grid.appendChild(item);
     });
 
+    renderRecognitionStats();
+
     const weak = $('weak-list');
     weak.innerHTML = '';
     const rows = Object.keys(state.stats).map((k) => ({ k, ...state.stats[k] }))
@@ -712,6 +809,27 @@ function renderDashboard() {
     });
 }
 
+// Tanıma gelişimi: son denemelerin dökümü ve ilk yarı / son yarı karşılaştırması
+function renderRecognitionStats() {
+    const box = $('recog-stats');
+    box.innerHTML = '';
+    let log = [];
+    try { log = JSON.parse(localStorage.getItem('selim_okur_asr_log') || '[]'); } catch (e) { /* boş */ }
+    log = log.filter((x) => x.verdict !== 'nospeech').slice(-60);
+    const row = (a, b) => { const d = document.createElement('div'); d.className = 'activity-item'; d.innerHTML = `<span>${a}</span><span style="font-size:13px;font-weight:700">${b}</span>`; box.appendChild(d); };
+    row('Öğrenilen ses/hece', `${Templates.labels().length} (${Templates.total()} örnek)`);
+    row('Öğrenilen tanıyıcı hatası', `${Learned.stats().aliases}`);
+    if (log.length < 6) { row('Otomatik tanıma oranı', 'Biraz daha oku, sonra gösteririm'); return; }
+    const rate = (xs) => Math.round((100 * xs.filter((x) => x.verdict === 'correct').length) / xs.length);
+    const half = Math.floor(log.length / 2);
+    const first = rate(log.slice(0, half)), last = rate(log.slice(half));
+    row(`Otomatik doğru (son ${log.length} deneme)`, `%${rate(log)}`);
+    row('İlk yarı → son yarı', `%${first} → %${last} ${last > first ? '📈' : last < first ? '📉' : '➖'}`);
+    const viaVoice = log.filter((x) => (x.why || '').startsWith('voice')).length;
+    const viaAlias = log.filter((x) => x.why === 'learned-alias').length;
+    if (viaVoice + viaAlias > 0) row('Ses ve alışkanlıkla tanınan', `${viaVoice + viaAlias} deneme`);
+}
+
 function openCertificate() {
     showScreen('certificate');
     $('cert-name').textContent = state.childName;
@@ -732,9 +850,10 @@ function applyParentModeText() {
 
 function refreshSettingsInfo() {
     const n = Templates.total();
+    const l = Learned.stats();
     $('template-count').textContent = n === 0
-        ? 'Henüz öğrenilmiş kayıt yok. Selim doğru okudukça (ya da sen onayladıkça) uygulama onun sesini öğrenir ve daha iyi tanır.'
-        : `${Templates.labels().length} farklı hece/ses için toplam ${n} kayıt öğrenildi.`;
+        ? 'Henüz öğrenilmiş kayıt yok. "Sesimi Tanıt" ile ya da Selim doğru okudukça (sen onayladıkça) uygulama onun sesini öğrenir ve daha iyi tanır.'
+        : `${Templates.labels().length} farklı hece/ses için toplam ${n} ses örneği, ${l.aliases} öğrenilmiş tanıyıcı hatası.`;
     $('engine-note').textContent = Recognizer.webSpeechAvailable()
         ? 'Bu cihazda tarayıcı konuşma tanıma var; ses eşleştirmeyle birlikte kullanılır.'
         : 'Bu cihazda tarayıcı konuşma tanıma güvenilir değil (iPad/Safari); yalnızca ses eşleştirme kullanılır. Doğruluk için doğru okumaları onayla.';
@@ -850,6 +969,7 @@ function setupEventListeners() {
     on('parent-mode-toggle', 'change', (e) => { state.isParentMode = e.target.checked; applyParentModeText(); saveState(); });
 
     on('btn-start', 'click', startLesson);
+    on('btn-teach', 'click', startTeach);
     on('btn-word-game', 'click', startWordGame);
     on('btn-studio', 'click', () => { renderStudio(); showScreen('studio'); });
     on('btn-studio-back', 'click', () => showScreen('home'));
@@ -863,7 +983,7 @@ function setupEventListeners() {
     on('btn-export-log', 'click', exportAsrLog);
     on('btn-mic-test', 'click', runMicTest);
     on('btn-clear-templates', 'click', async () => {
-        if (confirm('Selim\'in sesinden öğrenilenler silinsin mi?')) { await Templates.clear(); refreshSettingsInfo(); }
+        if (confirm('Selim\'in sesinden öğrenilenler silinsin mi?')) { await Templates.clear(); Learned.clear(); refreshSettingsInfo(); renderDashboard(); }
     });
     on('btn-reset-progress', 'click', () => {
         if (!confirm('Tüm ilerleme sıfırlanacak. Emin misiniz?')) return;

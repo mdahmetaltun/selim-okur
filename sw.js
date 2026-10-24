@@ -1,7 +1,7 @@
 // Çevrimdışı çalışma: uygulama kabuğu ağ-öncelikli (güncellemeler hemen görünsün), ses/yazı tipi/simge önbellek-öncelikli.
-const VERSION = 'selim-okur-v10';
+const VERSION = 'selim-okur-v11';
 const SHELL = ['./', 'index.html', 'style.css', 'game.css', 'app.js', 'manifest.json', 'fonts/fonts.css',
-    'js/curriculum.js', 'js/judge.js', 'js/dsp.js', 'js/verify.js', 'js/store.js', 'js/mic.js', 'js/audio.js', 'js/recognizer.js'];
+    'js/curriculum.js', 'js/judge.js', 'js/dsp.js', 'js/verify.js', 'js/store.js', 'js/templates.js', 'js/learn.js', 'js/mic.js', 'js/audio.js', 'js/recognizer.js'];
 
 self.addEventListener('install', (e) => {
     e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

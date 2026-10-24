@@ -256,9 +256,26 @@
         return items;
     }
 
+    /**
+     * Sesini tanıt: bilinen harf sesleri ve kolay hecelerden, henüz en az örneği olanlardan başlayarak liste.
+     * @param {Object} counts  { "hece/ka": örnek sayısı }
+     * @param {string[]} focus seçili harfler varsa yalnızca onları içerenler
+     */
+    function buildCalibration(knownLetters, counts = {}, { n = 16, focus = [], rng = Math.random } = {}) {
+        const known = normalizeKnown(knownLetters);
+        if (known.length === 0) return [];
+        const F = known.filter((l) => focus.map(fold).includes(l));
+        const cands = [
+            ...known.map((l) => item('ses', l, [l], 'Tanıt')),
+            ...syllablesFrom(known).filter((x) => x.difficulty === 'Simple' && x.type !== 'V').map((x) => sylItem(x, 'Tanıt'))
+        ].filter((it) => F.length === 0 || F.some((l) => has(it.text, l)));
+        const c = (it) => counts[it.key] || 0;
+        return shuffle(cands, rng).sort((a, b) => c(a) - c(b)).slice(0, n);
+    }
+
     function slug(text) {
         return fold(text).replace(/[.!?,]/g, '').trim().replace(/\s+/g, '_');
     }
 
-    return { LETTER_ORDER, VOWELS, LEXICON, SENTENCES, sentencesFor, buildLesson, buildPath, buildMixed, buildFocus, pathSteps, syllablesFrom, slug, stageOf, fold, isVowel, isConsonant, lettersThrough, normalizeKnown, generateSyllables, pickSyllable, wordsFor };
+    return { LETTER_ORDER, VOWELS, LEXICON, SENTENCES, sentencesFor, buildLesson, buildPath, buildMixed, buildFocus, buildCalibration, pathSteps, syllablesFrom, slug, stageOf, fold, isVowel, isConsonant, lettersThrough, normalizeKnown, generateSyllables, pickSyllable, wordsFor };
 });

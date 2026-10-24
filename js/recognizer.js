@@ -1,45 +1,10 @@
 /**
  * Dinleme ve değerlendirme: mikrofon kaydı + (varsa) tarayıcı konuşma tanıma birlikte çalışır,
- * sonuçlar Judge ve Verify ile tek karara indirilir. Onaylanan okumalar Selim'in ses şablonu olur.
+ * sonuçlar Judge ve Verify ile tek karara indirilir. Onaylanan okumalar Selim'in ses şablonu olur,
+ * tanıyıcının sürekli yaptığı hatalar (Learned) öğrenilir.
  */
-const Templates = (() => {
-    const MAX_PER_LABEL = 6;
-    let cache = new Map(); // label -> { feats, intra }
-
-    async function load() {
-        cache = new Map();
-        (await Store.allTemplates()).forEach((r) => cache.set(r.label, { feats: r.feats, intra: intraOf(r.feats) }));
-    }
-
-    function intraOf(feats) {
-        if (feats.length < 2) return null;
-        let m = Infinity;
-        for (let i = 0; i < feats.length; i++) for (let j = i + 1; j < feats.length; j++) m = Math.min(m, DSP.dtw(feats[i], feats[j]));
-        return m;
-    }
-
-    async function add(label, feat) {
-        if (!feat || feat.length < 10) return;
-        const cur = cache.get(label) ? cache.get(label).feats.slice() : [];
-        cur.push(feat);
-        while (cur.length > MAX_PER_LABEL) cur.shift();
-        cache.set(label, { feats: cur, intra: intraOf(cur) });
-        await Store.putTemplates(label, cur);
-    }
-
-    const count = (label) => (cache.get(label) ? cache.get(label).feats.length : 0);
-    const intra = (label) => (cache.get(label) ? cache.get(label).intra : null);
-    const dictFor = (labels) => {
-        const d = {};
-        labels.forEach((l) => { if (cache.has(l)) d[l] = cache.get(l).feats; });
-        return d;
-    };
-    const total = () => [...cache.values()].reduce((n, v) => n + v.feats.length, 0);
-    const labels = () => [...cache.keys()];
-    async function clear() { cache = new Map(); await Store.clearTemplates(); }
-
-    return { load, add, count, intra, dictFor, total, labels, clear };
-})();
+const Templates = createTemplates({ store: Store, dsp: DSP });
+const Learned = createLearned({ storage: localStorage, normalize: Judge.normalize });
 
 const Recognizer = (() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -104,6 +69,7 @@ const Recognizer = (() => {
      */
     async function evaluate(item, pool, heardResult) {
         const alts = heardResult.web ? heardResult.web.alts : [];
+        const poolKeys = pool.map((p) => p.key);
         let web = null;
         if (heardResult.webAvailable) {
             if (item.kind === 'cumle') web = Judge.judgeWords(item.units, alts);
@@ -112,40 +78,69 @@ const Recognizer = (() => {
             } else {
                 web = Judge.judge(item.text, alts, item.kind === 'hece' ? pool.map((p) => p.text) : []);
             }
+            // Daha önce öğrenilen tanıyıcı hataları: "kah" hep "ka" demekse kabul et; veli reddettiyse sorgula
+            const learned = Learned.check(item.key, alts, poolKeys);
+            if (learned === 'accept' && web.verdict !== 'correct') web = { ...web, verdict: 'correct', learned: 'accept' };
+            else if (learned === 'reject' && web.verdict === 'correct') web = { ...web, verdict: 'uncertain', learned: 'reject' };
         }
 
         let personal = null, ref = null, feat = null;
-        const templated = item.kind === 'ses' || item.kind === 'hece';
+        const templated = item.kind === 'ses' || item.kind === 'hece' || item.kind === 'kelime';
         if (templated && heardResult.audio.speech) {
             feat = featOf(heardResult.audio);
             if (feat.length > 10) {
-                const labels = [...new Set([item.key, ...pool.map((p) => p.key)])];
+                const labels = [...new Set([item.key, ...poolKeys])];
                 personal = DSP.classify(feat, Templates.dictFor(labels));
-                const refDict = {};
-                await Promise.all(labels.slice(0, 90).map(async (l) => {
-                    const f = await Voice.referenceFeatures(l);
-                    if (f) refDict[l] = [f];
-                }));
-                ref = DSP.classify(feat, refDict);
+                if (item.kind !== 'kelime') {
+                    const refDict = {};
+                    await Promise.all(labels.slice(0, 90).map(async (l) => {
+                        const f = await Voice.referenceFeatures(l);
+                        if (f) refDict[l] = [f];
+                    }));
+                    ref = DSP.classify(feat, refDict);
+                }
             }
         }
 
-        const personalLabels = Templates.labels().length;
         const result = Verify.fuse(web, personal, ref, {
             target: item.key,
             personalCount: Templates.count(item.key),
-            personalLabels,
+            personalLabels: Templates.labels().length,
+            rivals: poolKeys.filter((k) => Templates.count(k) > 0).length,
             intra: Templates.intra(item.key),
+            typical: Templates.typicalIntra(),
             speech: heardResult.audio.speech
         });
         const heard = (web && web.heard) || (alts[0] || '');
-        return { ...result, heard, feat, webAvailable: heardResult.webAvailable, srError: heardResult.srError };
+        const why = (web && web.learned === 'accept' && result.verdict === 'correct' && result.why === 'web') ? 'learned-alias' : result.why;
+        return { ...result, why, heard, alts, feat, webAvailable: heardResult.webAvailable, srError: heardResult.srError };
     }
 
-    /** Doğru okuma onaylandı (otomatik ya da veli): Selim'in sesini şablon olarak sakla. */
-    async function enroll(item, feat) {
-        if (feat && (item.kind === 'ses' || item.kind === 'hece')) await Templates.add(item.key, feat);
+    /**
+     * Doğru okuma onaylandı. Selim'in sesi şablon olur; veli onayladıysa ya da ses şablonu hedefi
+     * güçlü biçimde işaret ettiyse tanıyıcının o okumaya verdiği metin "takma ad" olarak öğrenilir.
+     */
+    async function confirmed(item, result, source) {
+        const feat = result && result.feat;
+        if (feat && (item.kind === 'ses' || item.kind === 'hece' || item.kind === 'kelime')) await Templates.add(item.key, feat);
+        if (result && result.alts && result.alts.length && (source === 'parent' || (result.why || '').startsWith('voice'))) {
+            Learned.confirm(item.key, item.text, result.alts);
+        }
     }
 
-    return { webSpeechAvailable, listen, evaluate, enroll, isApple };
+    /** Veli "doğru değildi" dedi ve uygulama doğru/belirsiz demişti: o metni bu hedef için reddet. */
+    function rejected(item, result) {
+        if (result && result.verdict !== 'wrong' && result.alts && result.alts.length) Learned.reject(item.key, item.text, result.alts);
+    }
+
+    /**
+     * Ses tanıtma: kayıtta konuşma varsa Selim'in sesini şablon olarak sakla (tanıma yapmadan).
+     * @returns {Promise<boolean>} saklandı mı
+     */
+    async function teach(item, audio) {
+        if (!audio.speech) return false;
+        return Templates.add(item.key, featOf(audio));
+    }
+
+    return { webSpeechAvailable, listen, evaluate, confirmed, rejected, teach, isApple };
 })();

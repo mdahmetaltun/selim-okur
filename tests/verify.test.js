@@ -26,11 +26,27 @@ test('web yanlış ama kişisel şablon güçlü destekliyorsa doğru', () => {
     assert.strictEqual(fuse(web('wrong'), null, null, opts).verdict, 'wrong');
 });
 
-test('az şablonla kişisel kanıt sayılmaz (sahte güven yok)', () => {
-    const few = { ...opts, personalCount: 1 };
-    assert.strictEqual(fuse(web('wrong'), strong('ka'), null, few).verdict, 'wrong');
+test('tek örnekle daha temkinli: büyük fark ister, küçük farkta kanıt yok', () => {
+    const one = { ...opts, personalCount: 1, intra: null };
+    assert.strictEqual(fuse(web('wrong'), strong('ka', 0.3), null, one).verdict, 'correct');
+    assert.strictEqual(fuse(web('wrong'), strong('ka', 0.12), null, one).verdict, 'wrong');
     const fewLabels = { ...opts, personalLabels: 1 };
     assert.strictEqual(fuse(web('uncertain'), strong('ka'), null, fewLabels).verdict, 'uncertain');
+    assert.strictEqual(fuse(web('wrong'), strong('ka'), null, { ...opts, personalCount: 0 }).verdict, 'wrong');
+});
+
+test('güvenlik: rakip hecelerin örneği yoksa Selim\'in sesi "doğru" diyemez', () => {
+    assert.strictEqual(fuse(web('wrong'), strong('ka'), null, { ...opts, rivals: 1 }).verdict, 'wrong');
+    assert.strictEqual(fuse(web('wrong'), strong('ka'), null, { ...opts, rivals: 2 }).verdict, 'correct');
+});
+
+test('güvenlik: hedefe "en yakın" olsa da çok uzaksa (kişinin tipik değişkenliğine göre) kanıt sayılmaz', () => {
+    const far = { best: 'ka', bestDist: 3.4, margin: 0.4 };
+    assert.strictEqual(fuse(web('uncertain'), far, null, { ...opts, intra: null, typical: 0.9 }).verdict, 'uncertain');
+    const near = { best: 'ka', bestDist: 1.4, margin: 0.4 };
+    assert.strictEqual(fuse(web('uncertain'), near, null, { ...opts, intra: null, typical: 0.9 }).verdict, 'correct');
+    // kişinin tekrarları daha değişkense kapı genişler
+    assert.strictEqual(fuse(web('uncertain'), far, null, { ...opts, intra: null, typical: 1.6 }).verdict, 'correct');
 });
 
 test('tanıyıcı yok (iPad): şablon yoksa belirsiz, güçlü şablon varsa doğru, sessizse nospeech', () => {

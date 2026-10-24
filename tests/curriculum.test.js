@@ -159,3 +159,18 @@ test('seçtiğim harfler: bilinmeyen harf yok sayılır, hiç seçim yoksa boş'
     assert.strictEqual(C.buildFocus(known, []).length, 0);
     assert.deepStrictEqual(C.buildFocus(known, ['k', 'n']).filter((i) => i.kind === 'ses').map((i) => i.text), ['n']);
 });
+
+test('ses tanıtma listesi: en az örneği olanlar önce, yalnızca bilinen harfler, seçili harfe göre süzülür', () => {
+    const known = C.lettersThrough('k');
+    const counts = {};
+    C.buildCalibration(known, {}, { n: 999 }).forEach((i) => { counts[i.key] = 5; });
+    counts['hece/ka'] = 0;
+    counts['ses/k'] = 1;
+    const list = C.buildCalibration(known, counts, { n: 5 });
+    assert.strictEqual(list[0].key, 'hece/ka');
+    assert.strictEqual(list[1].key, 'ses/k');
+    C.buildCalibration(known, {}, { n: 999 }).forEach((i) => [...i.text].forEach((l) => assert.ok(known.includes(l))));
+    const f = C.buildCalibration(known, {}, { n: 999, focus: ['l'] });
+    assert.ok(f.length > 0 && f.every((i) => i.text.includes('l')));
+    assert.strictEqual(C.buildCalibration([], {}).length, 0);
+});
