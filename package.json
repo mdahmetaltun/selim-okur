@@ -4,6 +4,13 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
-    "build:site": "python3 tools/build_site.py site"
+    "build:site": "python3 tools/build_site.py site",
+    "ios:sync": "npm run build:site && cap sync ios",
+    "ios:open": "cap open ios"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3"
   }
 }
