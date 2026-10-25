@@ -71,8 +71,9 @@
             rejects: Object.values(data.reject).reduce((n, m) => n + Object.keys(m).length, 0)
         });
         const clear = () => { data = { alias: {}, reject: {} }; save(); };
+        const replace = (d) => { data = { alias: (d && d.alias) || {}, reject: (d && d.reject) || {} }; save(); };
         const dump = () => JSON.parse(JSON.stringify(data));
 
-        return { confirm, reject, check, stats, clear, dump, forms };
+        return { confirm, reject, check, stats, clear, replace, dump, forms };
     };
 });

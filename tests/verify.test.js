@@ -53,5 +53,8 @@ test('tanıyıcı yok (iPad): şablon yoksa belirsiz, güçlü şablon varsa do�
     assert.strictEqual(fuse(null, null, null, opts).verdict, 'uncertain');
     assert.strictEqual(fuse(null, strong('ka'), null, opts).verdict, 'correct');
     assert.strictEqual(fuse(null, null, strong('ka'), opts).verdict, 'uncertain'); // referans tek başına yetmez
+    assert.strictEqual(fuse(null, null, strong('ka', 0.3), { ...opts, refAuto: true }).verdict, 'correct'); // iPad: güçlü hazır-ses eşleşmesi
+    assert.strictEqual(fuse(null, null, strong('ka', 0.1), { ...opts, refAuto: true }).verdict, 'uncertain'); // zayıfsa sor
+    assert.strictEqual(fuse(null, null, strong('ta', 0.4), { ...opts, refAuto: true }).verdict, 'uncertain'); // farklı heceyi gösteriyorsa kabul etme
     assert.strictEqual(fuse(null, null, null, { ...opts, speech: false }).verdict, 'nospeech');
 });

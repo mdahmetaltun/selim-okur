@@ -7,6 +7,7 @@
  * ref      : DSP.classify(üretilmiş/veli referansı) ya da null
  * opts     : { target, personalCount (hedefin kendi şablon sayısı), personalLabels (kaç farklı etiket),
  *              rivals (havuzdaki diğer öğelerden kaçının şablonu var),
+ *              refAuto (tanıyıcı yok: güçlü hazır-ses eşleşmesi tek başına "doğru" sayılabilir),
  *              intra (hedefin kendi şablonlarının iç mesafesi), typical (tüm şablonlarda tipik iç mesafe), speech (mikrofonda konuşma algılandı mı) }
  */
 (function (root, factory) {
@@ -68,6 +69,8 @@
         // tanıyıcı yok ya da sessiz: yalnızca ses şablonu
         if (ev.personal === 'support') return { ...base, verdict: 'correct', why: 'voice' };
         if (ev.personal === 'contradict') return { ...base, verdict: 'wrong', why: 'voice' };
+        // Tanıyıcı yoksa (iPad) ve henüz Selim'e ait kanıt yoksa, VTLN'li hazır-ses eşleşmesi yeterince güçlüyse kabul et
+        if (ev.ref === 'support' && opts.refAuto) return { ...base, verdict: 'correct', why: 'ref' };
         if (ev.ref === 'support') return { ...base, verdict: 'uncertain', why: 'ref-weak-support' };
         if (ev.ref === 'contradict') return { ...base, verdict: 'uncertain', why: 'ref-weak-contradict' };
         return { ...base, verdict: 'uncertain', why: 'no-evidence' };

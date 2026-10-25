@@ -56,17 +56,36 @@ npm test                # birim testleri
 | `node tools/benchmark_synth.js m` | Ses eşleştirmenin sentetik ölçümü (farklı espeak sesleri = farklı konuşmacı). |
 | `node tools/benchmark_learning.js m 3 [kapsama]` | Öğrenme eğrisi: hece başına örnek sayısına göre tanıma ve hata oranları. |
 | `python3 tools/build_artifact.py <klasör> --letters=12` | Tek dosyalı yayın sürümü. |
+| `npm run build:site` | iPad/telefon için yayın klasörü (`site/`). |
+| `node tools/benchmark_kids.js m` | Çocuk benzeri seslerde soğuk başlangıç ve VTLN kazancı (`MARGINS=1` güven tablosu). |
 
 Sentetik ölçüm (72 hece): 1 yabancı şablonla %43, 2 şablonla %86, 3 şablonla %99 doğru. Bu, yöntemin kaba tutarlılığıdır; gerçek
 çocuk sesiyle doğruluk için Ayarlar'dan tanıma günlüğünü indirip inceleyin.
 
 ## iPad / telefon
 
-Mikrofon için HTTPS gerekir. `.github/workflows/pages.yml` ile GitHub Pages'e yayınlanır (repo ayarlarında Pages kaynağı
-"GitHub Actions" olmalı, `main` dalına gönderince yayınlanır). Safari'de "Ana Ekrana Ekle" ile uygulama gibi açılır ve çevrimdışı çalışır.
-iPad'de tarayıcı konuşma tanıma güvenilir olmadığı için yalnızca ses eşleştirme + veli onayı kullanılır.
+iPad Safari'de mikrofon yalnızca **HTTPS** adreste açılır (`localhost` hariç; PC'deki `localhost` iPad'den erişilemez). Üç yol:
+
+1. **GitHub Pages:** `main`'e birleştirince `.github/workflows/pages.yml` yayınlar (repo → Settings → Pages → Source: *GitHub Actions*).
+2. **Netlify Drop / Cloudflare Pages:** `npm run build:site` ile oluşan `site/` klasörünü sürükle-bırak; HTTPS adres alırsın.
+3. Başka bir HTTPS sunucu.
+
+Sonra iPad Safari'de adresi aç, **Paylaş ⎙ ▸ Ana Ekrana Ekle** de. Ana ekran uygulaması tam ekran açılır, çevrimdışı çalışır ve Safari'nin
+7 gün sonra site verilerini silmesinden korunur. İlk açılışta sesler arka planda indirilir (~3 MB).
+
+iPad'e özgü yapılanlar:
+- Tek paylaşılan ses bağlamı; ilk dokunuşta kilit açma (iOS ses kuralı), güvenli alan boşlukları, dikey/yatay/bölünmüş ekran düzeni,
+  yakınlaştırma-seçme engeli, dokunmatik hedef boyutları, yapışan `:hover` düzeltmesi.
+- Mikrofon: iOS'ta ses işleme (yankı/gürültü bastırma) kapalı; okumadan sonra mikrofon bırakılır (medya sesi kısılmasın, turuncu nokta sönsün). Ayarlardan değişir.
+- Tarayıcı konuşma tanıma iOS'ta güvenilmez olduğu için kapalı: **Selim'in sesinden öğrenme + hazır ses (VTLN)** + veli onayı. İlk gün **Sesimi Tanıt** turu önerilir.
+- Bilgisayardaki ilerleme ve öğrenilenler **Ayarlar → Yedek ve Taşıma** ile iPad'e aktarılır.
+
+Geliştirme notu: Gerçek Safari (WebKit) bu ortamda kurulamadığı için iPad davranışı Chromium'da iPad ekranı/kullanıcı kimliği/dokunmatikle taklit edilerek test edildi.
+Safari'ye özgü ses/mikrofon davranışları iPad'de doğrulanmalı.
+
+Ses tanımayı geliştirme planı: [`docs/SES_TANIMA_YOL_HARITASI.md`](docs/SES_TANIMA_YOL_HARITASI.md).
 
 ## Yapı
 
 `js/curriculum.js` müfredat · `js/judge.js` fonetik hakem · `js/dsp.js` MFCC/DTW · `js/verify.js` karar birleştirme ·
-`js/mic.js` yakalama · `js/recognizer.js` dinleme ve değerlendirme · `js/templates.js` ses örnekleri · `js/learn.js` tanıyıcı hatalarını öğrenme · `js/audio.js` ses bankası · `js/store.js` IndexedDB · `app.js` arayüz.
+`js/platform.js` iOS/PWA ·  `js/backup.js` yedek ·  `js/mic.js` yakalama · `js/recognizer.js` dinleme ve değerlendirme · `js/templates.js` ses örnekleri · `js/learn.js` tanıyıcı hatalarını öğrenme · `js/audio.js` ses bankası · `js/store.js` IndexedDB · `app.js` arayüz.

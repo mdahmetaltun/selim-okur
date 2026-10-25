@@ -8,7 +8,7 @@ const Learned = createLearned({ storage: localStorage, normalize: Judge.normaliz
 
 const Recognizer = (() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isApple = Platform.isIOS;
 
     /** Tarayıcı konuşma tanıma bu cihazda güvenilir mi? (iPad/iPhone'da değil) */
     const webSpeechAvailable = () => !!SR && !isApple;
@@ -40,12 +40,12 @@ const Recognizer = (() => {
      * Bir okuma dinle.
      * @param {{engine:'auto'|'voice'|'web', onLevel:Function, onInterim:Function}} o
      */
-    async function listen({ engine = 'auto', onLevel, onInterim, maxMs = 6000, ctl = {} } = {}) {
+    async function listen({ engine = 'auto', onLevel, onInterim, maxMs = 6000, silenceMs = 800, ctl = {} } = {}) {
         await Mic.ensure();
         const useWeb = engine !== 'voice' && webSpeechAvailable();
         const sr = useWeb ? startWebSpeech() : null;
         const timer = sr ? setInterval(() => onInterim && sr.out.interim && onInterim(sr.out.interim), 150) : null;
-        const cap = Mic.capture({ maxMs, onLevel });
+        const cap = Mic.capture({ maxMs, silenceMs, onLevel });
         ctl.stop = cap.stop; // dışarıdan erken bitirmek için
         const audio = await cap.promise;
         let web = null, srError = null;
@@ -97,7 +97,8 @@ const Recognizer = (() => {
                         const f = await Voice.referenceFeatures(l);
                         if (f) refDict[l] = [f];
                     }));
-                    ref = DSP.classify(feat, refDict);
+                    // Hazır referans sesi başka bir konuşmacı: frekans ekseni ölçekleme (VTLN) ile çocuk/yetişkin farkını telafi et
+                    ref = DSP.classifyWarped(heardResult.audio.samples, heardResult.audio.rate, refDict);
                 }
             }
         }
@@ -109,7 +110,8 @@ const Recognizer = (() => {
             rivals: poolKeys.filter((k) => Templates.count(k) > 0).length,
             intra: Templates.intra(item.key),
             typical: Templates.typicalIntra(),
-            speech: heardResult.audio.speech
+            speech: heardResult.audio.speech,
+            refAuto: !heardResult.webAvailable && poolKeys.length >= 2
         });
         const heard = (web && web.heard) || (alts[0] || '');
         const why = (web && web.learned === 'accept' && result.verdict === 'correct' && result.why === 'web') ? 'learned-alias' : result.why;
@@ -122,7 +124,9 @@ const Recognizer = (() => {
      */
     async function confirmed(item, result, source) {
         const feat = result && result.feat;
-        if (feat && (item.kind === 'ses' || item.kind === 'hece' || item.kind === 'kelime')) await Templates.add(item.key, feat);
+        // Yalnızca hazır sesle eşleşip otomatik kabul edilenler şablon olmaz (%1 yanlış kabul örnekleri kirletmesin)
+        const unverified = source === 'auto' && result && result.why === 'ref';
+        if (feat && !unverified && (item.kind === 'ses' || item.kind === 'hece' || item.kind === 'kelime')) await Templates.add(item.key, feat);
         if (result && result.alts && result.alts.length && (source === 'parent' || (result.why || '').startsWith('voice'))) {
             Learned.confirm(item.key, item.text, result.alts);
         }

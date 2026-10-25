@@ -43,7 +43,7 @@ body = re.search(r'<body[^>]*>(.*)</body>', html, re.S).group(1)
 body = re.sub(r'<script.*?</script>', '', body, flags=re.S)
 
 # 4) JS: sırayla gömülür
-order = ['js/curriculum.js', 'js/judge.js', 'js/dsp.js', 'js/verify.js', 'js/store.js', 'js/templates.js', 'js/learn.js', 'js/mic.js', 'js/audio.js', 'js/recognizer.js', 'app.js']
+order = ['js/platform.js', 'js/curriculum.js', 'js/judge.js', 'js/dsp.js', 'js/verify.js', 'js/store.js', 'js/templates.js', 'js/learn.js', 'js/backup.js', 'js/mic.js', 'js/audio.js', 'js/recognizer.js', 'app.js']
 js = '\n'.join(rd(p) for p in order)
 assert '</script' not in js
 

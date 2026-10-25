@@ -48,3 +48,11 @@ test('kalıcıdır: yeni örnek aynı depodan okur; clear siler', () => {
     assert.strictEqual(createLearned({ storage, normalize }).check('hece/ka', ['kah'], []), null);
     assert.doesNotThrow(() => createLearned({ storage: { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); } }, normalize }));
 });
+
+test('replace: yedekten yüklenen öğrenilenler geçerli olur', () => {
+    const { L } = make();
+    L.replace({ alias: { 'hece/ka': { kah: 3 } }, reject: {} });
+    assert.strictEqual(L.check('hece/ka', ['kah'], []), 'accept');
+    L.replace(null);
+    assert.strictEqual(L.check('hece/ka', ['kah'], []), null);
+});

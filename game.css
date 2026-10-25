@@ -9,11 +9,12 @@
 @keyframes popIn { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* ===== Ana ekran: geniş ekranda iki sütun ===== */
-@media (min-width: 900px) {
+@media (min-width: 760px) {
   #screen-home { max-width: 1040px; }
-  #screen-home .home-card { display: grid; grid-template-columns: minmax(280px, 340px) 1fr; column-gap: 36px; align-content: start; }
+  #screen-home .home-card { display: grid; grid-template-columns: minmax(260px, 330px) 1fr; column-gap: 32px; align-content: start; }
+  #screen-home .env-banners { grid-column: 1 / -1; grid-row: 1; }
   #screen-home .home-header { grid-column: 1; margin-bottom: 20px; }
-  #screen-home .letter-picker { grid-column: 2; grid-row: 1 / span 6; }
+  #screen-home .letter-picker { grid-column: 2; grid-row: 2 / span 7; }
   #screen-home .mode-toggle, #screen-home #btn-start, #screen-home .quick-actions, #screen-home .footer-note { grid-column: 1; }
 }
 .letter-btn.last-known { box-shadow: 0 0 0 4px #ffd93d, 0 6px 14px rgba(0,0,0,.18); transform: scale(1.06); }
@@ -26,7 +27,7 @@
 /* ===== Okuma (ders) ekranı: kaydırma yok, her cihazda tek ekrana sığar ===== */
 #screen-game { max-width: 1120px; min-height: 0; }
 #screen-game.active { display: block; }
-.rd-shell { width: 100%; height: calc(100dvh - 32px); max-height: 860px; min-height: 520px; display: flex; flex-direction: column; gap: 14px;
+.rd-shell { width: 100%; height: calc(100dvh - var(--pad-t) - var(--pad-b)); max-height: 1240px; min-height: 520px; display: flex; flex-direction: column; gap: 14px;
   background: var(--card-bg); border-radius: 36px; padding: 18px clamp(14px, 3vw, 32px) 18px; border: 4px solid rgba(255,255,255,.75); box-shadow: var(--shadow-lg); }
 .rd-top { display: flex; align-items: center; gap: 14px; }
 .rd-iconbtn { width: 48px; height: 48px; border-radius: 50%; border: 2px solid #dfe6e9; background: #fff; font-size: 22px; cursor: pointer; flex: none; color: var(--text-dark); }
@@ -160,3 +161,43 @@ body { align-items: flex-start; }
 .btn-teach small { font-weight: 600; opacity: .75; }
 .btn-teach:hover { background: #d0ebff; border-color: #339af0; color: #1864ab; }
 #screen-home .btn-teach { grid-column: 1; }
+
+/* ===== iPad / dokunmatik ekran ===== */
+:root { --pad-t: max(16px, env(safe-area-inset-top, 0px)); --pad-b: max(16px, env(safe-area-inset-bottom, 0px)); --pad-l: max(16px, env(safe-area-inset-left, 0px)); --pad-r: max(16px, env(safe-area-inset-right, 0px)); }
+html, body { overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+body { padding: var(--pad-t) var(--pad-r) var(--pad-b) var(--pad-l); }
+* { -webkit-touch-callout: none; }
+button, .letter-btn, .rd-card, .rd-mic, .studio-row, .mode-chip { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+input[type="text"], input[type="file"] { -webkit-user-select: text; user-select: text; }
+/* Harf ızgarası ekran genişliğine uyar (iPad dikey/yatay/bölünmüş ekran) */
+.letter-grid { grid-template-columns: repeat(auto-fill, minmax(54px, 1fr)); }
+.letter-btn { width: 100%; height: auto; aspect-ratio: 1; min-height: 48px; }
+
+.env-banners { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.env-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-radius: 16px; padding: 10px 14px; font-size: 14px; font-weight: 600; line-height: 1.35; }
+.env-banner > span { flex: 1 1 220px; min-width: 0; }
+.env-banner.info { background: #e7f5ff; color: #1864ab; border: 2px solid #a5d8ff; }
+.env-banner.warn { background: #fff3bf; color: #8a5a00; border: 2px solid #ffd43b; }
+.env-banner button { border: none; border-radius: 12px; padding: 9px 14px; min-height: 40px; font-family: var(--font-heading); font-weight: 700; font-size: 14px; background: #fff; color: #1864ab; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+
+/* Dokunmatik: yapışan :hover etkilerini kapat, hedefleri büyüt */
+@media (hover: none) {
+  .rd-btn:hover, .rd-mic:hover, .btn-primary:hover, .btn-secondary:hover, .btn-outline:hover, .letter-btn:hover, .mode-chip:hover,
+  .rd-iconbtn:hover, .btn-teach:hover, .studio-tab:hover, .path-status button:hover { transform: none; }
+  .rd-btn:hover, .rd-iconbtn:hover { border-color: #dfe6e9; color: var(--text-dark); }
+  .mode-chip:hover { border-color: #dfe6e9; }
+  .mode-chip.active:hover { border-color: var(--primary-dark); }
+  .btn-outline:hover { border-color: #dfe6e9; color: var(--text-dark); background: var(--text-white); }
+  .btn-teach:hover { background: #e7f5ff; border-color: #74c0fc; }
+}
+@media (pointer: coarse) {
+  .rd-btn { min-height: 60px; }
+  .rd-mic { min-height: 72px; }
+  .rd-iconbtn { width: 56px; height: 56px; }
+  .rd-parent button { min-height: 48px; padding: 10px 18px; }
+  .mode-chip, .btn-outline, .btn-secondary, .studio-tab, .path-status button { min-height: 48px; }
+  .studio-row button { width: 52px; height: 52px; }
+  .syllable-bank-btn, .syllable-slot { min-height: 64px; }
+}
+/* iPad bölünmüş ekran / dar pencere */
+@media (max-width: 560px) { .rd-shell { padding: 12px; } .rd-parent { font-size: 14px; } }

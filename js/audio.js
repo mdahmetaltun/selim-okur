@@ -10,7 +10,6 @@ const Voice = (() => {
     let pack = null; // { index: {anahtar: [başlangıç, uzunluk]}, blob } — tek dosyada toplanmış sesler (yayın sürümü)
     let recorded = new Set();
     let unlocked = false;
-    let ctx = null;
     const refCache = new Map();
     let curUrl = null;
     const fileUrls = new Map(); // dosya anahtarı -> blob adresi (bir kez indirilir; iOS ve kısıtlı çerçevelerde güvenilir)
@@ -127,8 +126,7 @@ const Voice = (() => {
             const url = await urlFor(key);
             if (url) {
                 const buf = await (await fetch(url)).arrayBuffer();
-                ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-                const audio = await ctx.decodeAudioData(buf);
+                const audio = await Platform.audioContext().decodeAudioData(buf);
                 feat = DSP.features(audio.getChannelData(0), audio.sampleRate);
             }
         } catch (e) { feat = null; }
@@ -136,6 +134,20 @@ const Voice = (() => {
         return refCache.get(key);
     }
 
-    return { init, unlock, play, stop, has, source, saveRecording, deleteRecording, referenceFeatures,
+    /**
+     * Çevrimdışı için tüm ses dosyalarını arka planda indir (servis çalışanı önbelleğe alır).
+     * Yayın sürümündeki tek paket zaten tek seferde iner. Bir kez çalışır.
+     */
+    async function warmCache(onProgress) {
+        if (pack || manifest.size === 0 || !navigator.onLine) return false;
+        const keys = [...manifest];
+        for (let i = 0; i < keys.length; i += 6) {
+            await Promise.all(keys.slice(i, i + 6).map((k) => fetch(`audio/${k}.mp3`).then((r) => r.ok).catch(() => false)));
+            if (onProgress) onProgress(Math.min(keys.length, i + 6), keys.length);
+        }
+        return true;
+    }
+
+    return { init, warmCache, unlock, play, stop, has, source, saveRecording, deleteRecording, referenceFeatures,
         get recordedKeys() { return recorded; }, get fileKeys() { return manifest; } };
 })();

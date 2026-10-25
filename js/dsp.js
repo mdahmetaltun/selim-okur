@@ -55,9 +55,11 @@
     const hz2mel = (f) => 2595 * Math.log10(1 + f / 700);
     const mel2hz = (m) => 700 * (10 ** (m / 2595) - 1);
 
-    const melBank = (() => {
+    /** Mel filtre bankası. alpha != 1: frekans ekseni ölçeklenir (VTLN: çocuk/yetişkin formant farkı). */
+    function makeBank(alpha) {
+        const nyq = TARGET_RATE / 2 - 100;
         const lo = hz2mel(80), hi = hz2mel(TARGET_RATE / 2 - 200);
-        const pts = Array.from({ length: NMEL + 2 }, (_, i) => mel2hz(lo + ((hi - lo) * i) / (NMEL + 1)));
+        const pts = Array.from({ length: NMEL + 2 }, (_, i) => Math.min(nyq, mel2hz(lo + ((hi - lo) * i) / (NMEL + 1)) * alpha));
         const bins = pts.map((f) => Math.floor(((NFFT + 1) * f) / TARGET_RATE));
         const bank = [];
         for (let m = 1; m <= NMEL; m++) {
@@ -67,7 +69,13 @@
             bank.push(f);
         }
         return bank;
-    })();
+    }
+    const bankCache = new Map();
+    const bankFor = (alpha) => {
+        const key = alpha.toFixed(3);
+        if (!bankCache.has(key)) bankCache.set(key, makeBank(alpha));
+        return bankCache.get(key);
+    };
 
     const dctMat = Array.from({ length: NCEP }, (_, i) =>
         Float32Array.from({ length: NMEL }, (_, j) => Math.cos((Math.PI * i * (j + 0.5)) / NMEL)));
@@ -98,7 +106,8 @@
     }
 
     /** MFCC (13) + delta yok; kepstral ortalama/varyans normalizasyonu (konuşmacı farkını azaltır). */
-    function mfcc(x) {
+    function mfcc(x, alpha = 1) {
+        const melBank = bankFor(alpha);
         const frames = [];
         const emph = new Float32Array(x.length);
         for (let i = 1; i < x.length; i++) emph[i] = x[i] - 0.97 * x[i - 1];
@@ -139,11 +148,41 @@
     }
 
     /** Ham ses -> öznitelik dizisi (16 kHz'e indir, sessizliği kırp, MFCC). */
-    function features(samples, rate) {
+    function features(samples, rate, alpha = 1) {
         const x = resample(samples, rate);
         const t = trimSilence(x);
         if (t.length < FRAME * 3) return [];
-        return mfcc(t);
+        return mfcc(t, alpha);
+    }
+
+    /** VTLN için denenecek eksen ölçekleri (1 = değişiklik yok). */
+    const WARPS = [0.86, 0.93, 1, 1.08, 1.17, 1.27];
+
+    /**
+     * Konuşmacı farkını telafi ederek sınıflandır: test sesi her ölçekle işlenir, her etiket için en iyi ölçek
+     * seçilir. Aşırı serbestlik yanlış eşleşmeyi artırmasın diye 1'den uzak ölçeklere küçük bir ceza uygulanır.
+     * @returns {classify çıktısı + warp}
+     */
+    function classifyWarped(samples, rate, templates, { warps = WARPS, penalty = 0.04 } = {}) {
+        const per = {};
+        let bestWarp = 1, bestD = Infinity;
+        warps.forEach((a) => {
+            const f = features(samples, rate, a);
+            if (f.length < 10) return;
+            Object.keys(templates).forEach((label) => {
+                let d = Infinity;
+                templates[label].forEach((t) => { d = Math.min(d, dtw(f, t)); });
+                d *= 1 + penalty * Math.abs(Math.log(a) / Math.log(1.1));
+                if (d < (per[label] ? per[label].d : Infinity)) per[label] = { d, a };
+            });
+        });
+        const scores = Object.keys(per).map((label) => ({ label, d: per[label].d })).sort((x, y) => x.d - y.d);
+        if (scores.length === 0) return null;
+        bestD = scores[0].d;
+        bestWarp = per[scores[0].label].a;
+        const [b, s2] = scores;
+        return { best: b.label, bestDist: bestD, second: s2 ? s2.label : null, secondDist: s2 ? s2.d : Infinity,
+            margin: s2 ? (s2.d - b.d) / s2.d : 1, scores, warp: bestWarp };
     }
 
     const frameDist = (a, b) => {
@@ -200,5 +239,5 @@
         };
     }
 
-    return { TARGET_RATE, resample, trimSilence, mfcc, features, dtw, classify };
+    return { TARGET_RATE, WARPS, resample, trimSilence, mfcc, features, dtw, classify, classifyWarped };
 });

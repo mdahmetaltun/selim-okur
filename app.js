@@ -29,13 +29,14 @@ const state = {
     character: '🦁',
     sfxEnabled: true,
     engine: 'auto',
+    micRelease: Platform.isIOS, // her okumadan sonra mikrofonu bırak (iPad'de medya sesi kısılmasın)
     mode: 'path',          // path | mixed | focus
     focusLetters: [],      // 'Seçtiğim harfler' modunda çalışılacak harfler
     pathStep: 0,           // 'Baştan ilerle' yolunda tamamlanan adım sayısı
     stats: {},       // anahtar -> { ok, tries }
     activities: []
 };
-const PERSIST = ['knownLetters', 'isLowerCase', 'score', 'lessons', 'isParentMode', 'isAutoMode', 'childName', 'character', 'sfxEnabled', 'engine', 'mode', 'focusLetters', 'pathStep', 'stats', 'activities'];
+const PERSIST = ['knownLetters', 'isLowerCase', 'score', 'lessons', 'isParentMode', 'isAutoMode', 'childName', 'character', 'sfxEnabled', 'engine', 'micRelease', 'mode', 'focusLetters', 'pathStep', 'stats', 'activities'];
 
 const $ = (id) => document.getElementById(id);
 const screens = {};
@@ -51,7 +52,8 @@ function init() {
     renderDashboard();
     setupEventListeners();
     showScreen('home');
-    Promise.all([Voice.init(), Templates.load()]).then(refreshSettingsInfo);
+    Promise.all([Voice.init(), Templates.load()]).then(() => { refreshSettingsInfo(); renderEnvBanners(); warmAudioOnce(); });
+    renderEnvBanners();
 }
 
 function loadState() {
@@ -71,6 +73,7 @@ function loadState() {
     $('setting-sfx').checked = state.sfxEnabled;
     $('setting-auto-mode').checked = state.isAutoMode;
     $('setting-engine').value = state.engine;
+    $('setting-mic-release').checked = state.micRelease;
     $('parent-mode-toggle').checked = state.isParentMode;
     applyParentModeText();
     $('character').textContent = state.character;
@@ -430,7 +433,8 @@ function micErrorText(e) {
     try { embedded = window.top !== window.self; } catch (err) { embedded = true; }
     if (embedded) return 'Bu önizleme çerçevesinde mikrofon kapalı. Uygulamayı kendi bilgisayarında tarayıcıda aç (node server.js, localhost:3000). Şimdilik veli onayını kullanabilirsin.';
     if (e.code === 'denied') return 'Mikrofon izni kapalı. Adres çubuğundaki kilit simgesinden mikrofona izin ver, sonra sayfayı yenile. Ya da veli onayını kullan.';
-    if (e.code === 'unsupported') return 'Mikrofon için sayfa HTTPS ya da localhost üzerinden açılmalı.';
+    if (e.code === 'insecure') return 'Mikrofon için sayfa HTTPS ile açılmalı (localhost hariç). iPad için README\'deki yayın adımlarına bak.';
+    if (e.code === 'unsupported') return 'Bu tarayıcı mikrofon erişimini desteklemiyor.';
     return `Mikrofon açılamadı: ${e.message}`;
 }
 
@@ -483,7 +487,9 @@ async function onListenClick() {
             ctl: lesson.ctl,
             onLevel: (v) => $('btn-listen').style.setProperty('--lvl', v.toFixed(2)),
             onInterim: (t) => { $('rd-heard').textContent = `“${t}”`; },
-            maxMs: item.kind === 'cumle' ? 12000 : 6000
+            maxMs: item.kind === 'cumle' ? 12000 : 6000,
+            // hece hece okuyan çocuk arada durur: kelime/cümlede daha uzun sessizliği bitiş sayma
+            silenceMs: item.kind === 'cumle' ? 1600 : item.kind === 'kelime' ? 1300 : 800
         });
     } catch (e) {
         lesson.busy = false;
@@ -491,9 +497,20 @@ async function onListenClick() {
         showFeedback(`Dinleme hatası: ${e.message}`, 'error');
         return;
     }
+    if (state.micRelease && lesson.meta.mode !== 'teach') Mic.release();
+    const problem = audioProblem(heard.audio);
+    if (problem && lesson.meta.mode !== 'teach') {
+        lesson.busy = false;
+        setMicState('idle');
+        $('rd-card').classList.add('again');
+        say(problem.say);
+        showFeedback(problem.text, 'warning');
+        return;
+    }
     if (lesson.meta.mode === 'teach') {
         lesson.busy = false;
         setMicState('idle');
+        if (problem && problem.fatal) { say(problem.say); showFeedback(problem.text, 'warning'); return; }
         await handleTeach(item, heard);
         return;
     }
@@ -515,6 +532,17 @@ async function onListenClick() {
     logAttempt(item, r);
     setMicState('idle');
     applyVerdict(item, r);
+}
+
+// Kayıt kalitesi: ses hiç gelmediyse ya da çok sessiz/bozuksa yargılama; çocuğu yanlış cezalandırma
+function audioProblem(a) {
+    if (a.reason === 'no-audio' || a.frames === 0) {
+        Mic.release(); // bir sonraki dokunuşta mikrofon yeniden açılır
+        return { fatal: true, say: 'Mikrofon sesi gelmiyor. Bir daha dokun!', text: 'Mikrofondan ses gelmedi. Ekrana dokunup tekrar dene; olmazsa Ayarlar → Mikrofonu test et.' };
+    }
+    if (a.speech && a.clipped) return { say: 'Çok yüksek oldu. Biraz yavaş söyle!', text: 'Ses çok yüksek geldi (bozuldu). Mikrofondan biraz uzaklaşıp tekrar dene.' };
+    if (a.speech && a.snr < 6) return { say: 'Etraf gürültülü. Bir daha!', text: 'Ortam gürültüsü fazla. Sessiz bir yerde tekrar dene.' };
+    return null;
 }
 
 function applyVerdict(item, r) {
@@ -610,6 +638,7 @@ function finishTeach() {
 }
 
 function finishLesson() {
+    Platform.persistStorage();
     if (lesson.meta.mode === 'teach') { finishTeach(); return; }
     lesson.done = true;
     state.lessons++;
@@ -866,6 +895,7 @@ function saveSettings() {
     state.isAutoMode = $('setting-auto-mode').checked;
     state.isParentMode = $('parent-mode-toggle').checked;
     state.engine = $('setting-engine').value;
+    state.micRelease = $('setting-mic-release').checked;
     $('character').textContent = state.character;
     saveState();
     alert('Ayarlar kaydedildi!');
@@ -897,6 +927,78 @@ async function runMicTest() {
     }
     meter.style.width = '0';
     btn.disabled = false;
+}
+
+// Sesleri çevrimdışı için bir kez arka planda indir (servis çalışanı yoksa ya da yayın paketinde gerekmez)
+function warmAudioOnce() {
+    if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;
+    const flag = 'selim_okur_audio_warm_v12';
+    try { if (localStorage.getItem(flag) === '1') return; } catch (e) { return; }
+    navigator.serviceWorker.ready.then(() => new Promise((r) => setTimeout(r, 2500))).then(() => Voice.warmCache())
+        .then((done) => { if (done) { try { localStorage.setItem(flag, '1'); } catch (e) { /* */ } } }).catch(() => {});
+}
+
+// ---------- Ortam uyarıları (iPad/PWA/HTTPS) ----------
+const dismissed = (k) => { try { return localStorage.getItem(`selim_okur_dismiss_${k}`) === '1'; } catch (e) { return false; } };
+const dismiss = (k) => { try { localStorage.setItem(`selim_okur_dismiss_${k}`, '1'); } catch (e) { /* */ } renderEnvBanners(); };
+
+function renderEnvBanners() {
+    const box = $('env-banners');
+    if (!box) return;
+    box.innerHTML = '';
+    const add = (cls, html, actions = []) => {
+        const d = document.createElement('div');
+        d.className = `env-banner ${cls}`;
+        d.innerHTML = `<span>${html}</span>`;
+        actions.forEach(({ label, fn }) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = fn; d.appendChild(b); });
+        box.appendChild(d);
+    };
+    if (!Platform.isSecure) add('warn', '🔒 Mikrofon için bu sayfa <b>HTTPS</b> ile açılmalı (README → iPad).');
+    if (Platform.isIOS && !Platform.isStandalone && !dismissed('a2hs')) {
+        add('info', '📲 En iyi sonuç için Safari\'de <b>Paylaş ⎙ ▸ Ana Ekrana Ekle</b> de. Uygulama tam ekran açılır ve öğrendikleri silinmez.', [{ label: 'Tamam', fn: () => dismiss('a2hs') }]);
+    }
+    if (Templates.total() === 0 && !Recognizer.webSpeechAvailable() && !dismissed('teach1')) {
+        add('info', '🎙 Bu cihazda uygulama Selim\'in sesini kendisi öğrenmeli. Önce <b>Sesimi Tanıt</b> ile 3 dakikalık bir tur yap.', [{ label: 'Şimdi tanıt', fn: startTeach }, { label: 'Sonra', fn: () => dismiss('teach1') }]);
+    }
+}
+
+// ---------- Yedek ve taşıma ----------
+async function exportBackup() {
+    const voices = [];
+    for (const key of await Store.allVoiceKeys()) {
+        const row = await Store.getVoice(key);
+        if (row && row.blob) voices.push({ key, type: row.blob.type || 'audio/mp4', data: Backup.toBase64(new Uint8Array(await row.blob.arrayBuffer())) });
+    }
+    const st = {};
+    PERSIST.forEach((k) => { st[k] = state[k]; });
+    let log = [];
+    try { log = JSON.parse(localStorage.getItem('selim_okur_asr_log') || '[]'); } catch (e) { /* */ }
+    const text = JSON.stringify(Backup.build({ state: st, learned: Learned.dump(), templates: Templates.dictFor(Templates.labels()), voices, log }));
+    const blob = new Blob([text], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `selim-okur-yedek-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+async function importBackup(file) {
+    let parsed;
+    try { parsed = Backup.parse(await file.text()); } catch (e) { alert(e.message); return; }
+    const n = Object.keys(parsed.templates).length;
+    if (!confirm(`Yedek (${(parsed.date || '').slice(0, 10)}) yüklenecek: ${n} ses/hece örneği, ${parsed.voices.length} kayıt. Bu cihazdaki mevcut ilerleme ve öğrenilenlerin yerine geçer. Devam edilsin mi?`)) return;
+    try {
+        localStorage.setItem('selim_okur_state', JSON.stringify(parsed.state));
+        localStorage.setItem('selim_okur_asr_log', JSON.stringify(parsed.log || []));
+        Learned.replace(parsed.learned);
+        await Store.clearTemplates();
+        for (const [label, feats] of Object.entries(parsed.templates)) await Store.putTemplates(label, feats);
+        for (const key of await Store.allVoiceKeys()) await Store.delVoice(key);
+        for (const v of parsed.voices) await Store.putVoice(v.key, new Blob([Backup.fromBase64(v.data)], { type: v.type }));
+    } catch (e) { alert(`Yüklenemedi: ${e.message}`); return; }
+    location.reload();
 }
 
 // ---------- Seslerim (kayıt stüdyosu) ----------
@@ -955,7 +1057,13 @@ async function toggleStudioRecord(it, btn) {
 // ---------- Olaylar ----------
 function setupEventListeners() {
     const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
-    document.addEventListener('pointerdown', () => Voice.unlock(), { once: true });
+    // iOS: ses çalma ve ses bağlamı ancak bir dokunuş içinde açılır
+    const unlockAll = () => { Voice.unlock(); Platform.unlockAudio(); };
+    document.addEventListener('pointerdown', unlockAll, { passive: true });
+    document.addEventListener('touchend', unlockAll, { once: true, passive: true });
+    // iPad: çift dokunma/sıkıştırma ile yakınlaşma ve sürükleyerek yenileme oyunu bozmasın
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault()));
+    document.addEventListener('dblclick', (e) => e.preventDefault());
 
     on('letter-grid', 'click', (e) => {
         const b = e.target.closest('.letter-btn');
@@ -981,6 +1089,8 @@ function setupEventListeners() {
     on('btn-parent-dashboard', 'click', () => showScreen('dashboard'));
     on('btn-settings', 'click', () => showScreen('settings'));
     on('btn-export-log', 'click', exportAsrLog);
+    on('btn-backup', 'click', exportBackup);
+    on('file-restore', 'change', (e) => { const f = e.target.files && e.target.files[0]; if (f) importBackup(f); e.target.value = ''; });
     on('btn-mic-test', 'click', runMicTest);
     on('btn-clear-templates', 'click', async () => {
         if (confirm('Selim\'in sesinden öğrenilenler silinsin mi?')) { await Templates.clear(); Learned.clear(); refreshSettingsInfo(); renderDashboard(); }
@@ -1019,7 +1129,8 @@ let sfxCtx = null;
 function playSound(type) {
     if (!state.sfxEnabled) return;
     try {
-        sfxCtx = sfxCtx || new (window.AudioContext || window.webkitAudioContext)();
+        sfxCtx = Platform.audioContext();
+        if (sfxCtx.state !== 'running') sfxCtx.resume().catch(() => {});
         const t = sfxCtx.currentTime, osc = sfxCtx.createOscillator(), gain = sfxCtx.createGain();
         osc.connect(gain); gain.connect(sfxCtx.destination);
         const tune = {

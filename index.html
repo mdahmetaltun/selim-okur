@@ -2,11 +2,12 @@
 <html lang="tr" class="no-js">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#ff6b6b">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="format-detection" content="telephone=no">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Selim Okur">
     <meta name="description" content="1. Sınıf çocukları için Türkçe okuma eğitimi uygulaması">
     <title>Selim Okur - 1. Sınıf Okuma Eğitimi</title>
@@ -22,6 +23,7 @@
     <!-- ========== EKRAN 1: ANA MENÜ ========== -->
     <div id="screen-home" class="screen active">
         <div class="home-card glass-card">
+            <div class="env-banners" id="env-banners"></div>
             <div class="home-header">
                 <div class="app-logo animated-bounce">📖</div>
                 <h1>Selim Okur</h1>
@@ -398,6 +400,14 @@
                     <p class="setting-desc" id="engine-note"></p>
                 </div>
                 <div class="setting-item">
+                    <label>Her okumadan sonra mikrofonu bırak</label>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="setting-mic-release">
+                        <span class="toggle-slider"></span>
+                    </div>
+                    <p class="setting-desc">iPad'de uygulama sesi kısık çıkıyorsa ya da turuncu mikrofon noktası hep yanıyorsa aç (iPad'de varsayılan açık).</p>
+                </div>
+                <div class="setting-item">
                     <label>Mikrofon testi</label>
                     <div class="mic-test">
                         <button type="button" id="btn-mic-test" class="btn-outline" style="width:100%">🎤 Mikrofonu test et</button>
@@ -409,6 +419,16 @@
                     <label>Selim'in sesinden öğrenilen kayıt</label>
                     <p class="setting-desc" id="template-count">0</p>
                     <button type="button" id="btn-clear-templates" class="btn-outline" style="width:100%">Öğrenilenleri sil</button>
+                </div>
+            </div>
+
+            <div class="settings-group">
+                <h3 class="settings-group-title">Yedek ve Taşıma</h3>
+                <div class="setting-item">
+                    <p class="setting-desc">Ayarlar, ilerleme, Selim'in sesinden öğrenilenler ve kendi sesinle yaptığın kayıtlar tek dosyada. Bilgisayardan iPad'e taşımak ya da silinmeye karşı saklamak için kullan.</p>
+                    <button type="button" id="btn-backup" class="btn-outline" style="width:100%">⬇ Yedek dosyası indir</button>
+                    <label class="btn-outline file-btn" for="file-restore" style="width:100%;display:block;text-align:center;margin:8px 0 0;cursor:pointer">⬆ Yedekten yükle</label>
+                    <input type="file" id="file-restore" accept="application/json,.json" hidden>
                 </div>
             </div>
 
@@ -431,6 +451,7 @@
     <audio id="audio-wrong"></audio>
     <audio id="audio-levelup"></audio>
 
+    <script src="js/platform.js"></script>
     <script src="js/curriculum.js"></script>
     <script src="js/judge.js"></script>
     <script src="js/dsp.js"></script>
@@ -438,6 +459,7 @@
     <script src="js/store.js"></script>
     <script src="js/templates.js"></script>
     <script src="js/learn.js"></script>
+    <script src="js/backup.js"></script>
     <script src="js/mic.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/recognizer.js"></script>

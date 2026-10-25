@@ -47,3 +47,12 @@ test('classify: doğru etiketi bulur ve margin verir', () => {
     assert.ok(r.margin > 0.1);
     assert.strictEqual(DSP.classify(DSP.features(tone(300, 900), RATE), {}), null);
 });
+
+test('VTLN: frekansı kaydırılmış (çocuk benzeri) kayıt, ölçek araması ile doğru şablona eşleşir', () => {
+    const t = { up: [DSP.features(tone(300, 900), RATE)], down: [DSP.features(tone(900, 300), RATE)] };
+    const shifted = tone(345, 1035, 430); // %15 yukarı kaydırılmış yükselen ton
+    const r = DSP.classifyWarped(shifted, RATE, t);
+    assert.strictEqual(r.best, 'up');
+    assert.ok(DSP.WARPS.includes(r.warp));
+    assert.strictEqual(DSP.classifyWarped(new Float32Array(16000), RATE, t), null);
+});
